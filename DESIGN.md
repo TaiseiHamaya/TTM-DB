@@ -26,9 +26,9 @@ Google Sheets (GAS) -> Discord Webhook -> Bot
 ### 技術候補
 
 - twilight 0.17 (twilight-gateway, twilight-http, twilight-model, twilight-util) を用いる。Modal 内の選択メニュー (Label) とファイルアップロードに対応しているため採用した
-- google-sheets4 と yup-oauth2 と tokio を用いる。Service Account による認証とする
+- Sheets API は reqwest で直接呼び出し、認証は yup-oauth2 による Service Account 認証とする。非同期ランタイムは tokio とする
 - 設定項目は DISCORD_TOKEN、GUILD_ID、FORUM_CHANNEL_ID、SPREADSHEET_ID、GOOGLE_SA_JSON とする
-- マスタと列定義はコード直書きを禁止する。config.toml と Sheets マスタシートから起動時と定期で読み込む
+- マスタと列定義はコード直書きを禁止する。config.toml と Sheets マスタシートから起動時に読み込み、以降は GAS から送られる内容で更新する
 
 ## 3. チャンネル設計
 

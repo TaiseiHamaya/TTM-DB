@@ -12,7 +12,7 @@ Discord でタスクチケットの発行と状態管理を行う Bot です。�
    - `status` 行の C列は役割 (`initial` / `in_progress` / `done` / `suspended` / `discarded`)。名称は自由に変更可
    - `assignee` 行は手動で追加するか (C列=Discord ID)、`/sync members` や参加者追加時に Bot が自動で追記する
    - 名称変更・統合は `rename | 旧名 | 新名` の行を追加して `/sync tags` を実行する。tickets の値が新名に移り、masters に無くなったタグは Forum から削除される
-4. GCP で Service Account を作成して Sheets API を有効化し、スプレッドシートを Service Account のメールに **編集者** で共有する
+4. Google Cloud で Service Account を作成して Sheets API を有効化し、スプレッドシートを Service Account のメールに **編集者** で共有する
 
 ### 2. シート名・ヘッダ名・担当者名を設定する
 

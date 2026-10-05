@@ -23,15 +23,19 @@ use crate::store::{Table, Ticket};
 pub const BUTTON_PREFIX: &str = "tm:st:";
 const FOOTER_UPDATED: &str = "更新 ";
 
+/// Post タイトル "タイトル [T-0001]"。進行度は含めない (スレッド名の変更は Discord のレート制限が
+/// 厳しいため、進行度のたびに変えるとすぐ制限に当たる。進行度はタグと Embed で表示する)。
+/// スレッド名は100文字までなので、末尾の ID が切れないようタイトル側を切り詰める
 pub fn post_title(t: &Ticket) -> String {
-    let s = format!("[{}][{}] {}", t.id(), t.get(Col::Status), t.get(Col::Title));
-    truncate(&s, 100)
+    let suffix = format!(" [{}]", t.id());
+    let room = 100usize.saturating_sub(suffix.chars().count()).max(1);
+    format!("{}{suffix}", truncate(t.get(Col::Title), room))
 }
 
-/// Post タイトル "[T-0001][着手中] ..." からチケット ID を取り出す
+/// Post タイトル "... [T-0001]" からチケット ID を取り出す
 pub fn ticket_id_from_title(title: &str) -> Option<&str> {
-    let rest = title.strip_prefix('[')?;
-    let (id, _) = rest.split_once(']')?;
+    let rest = title.trim_end().strip_suffix(']')?;
+    let (_, id) = rest.rsplit_once('[')?;
     (!id.is_empty()).then_some(id)
 }
 
@@ -325,8 +329,31 @@ mod tests {
 
     #[test]
     fn id_from_title() {
-        assert_eq!(ticket_id_from_title("[T-0001][着手中] ログイン"), Some("T-0001"));
+        assert_eq!(ticket_id_from_title("ログイン [T-0001]"), Some("T-0001"));
+        assert_eq!(ticket_id_from_title("[仮] ログイン [T-0001]"), Some("T-0001"));
         assert_eq!(ticket_id_from_title("雑談"), None);
-        assert_eq!(ticket_id_from_title("[]x"), None);
+        assert_eq!(ticket_id_from_title("x []"), None);
+    }
+
+    #[test]
+    fn long_title_keeps_id() {
+        let cfg = Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml")).unwrap();
+        let long = "あ".repeat(200);
+        let rows = vec![
+            cfg.required_cols().iter().map(|c| cfg.header(*c).to_owned()).collect::<Vec<_>>(),
+            cfg.required_cols()
+                .iter()
+                .map(|c| match c {
+                    Col::TicketId => "T-0001".to_owned(),
+                    Col::Title => long.clone(),
+                    _ => String::new(),
+                })
+                .collect(),
+        ];
+        let table = Table::from_rows(&rows, &cfg).unwrap();
+        let title = post_title(&table.tickets[0]);
+        assert_eq!(title.chars().count(), 100);
+        assert!(title.ends_with("… [T-0001]"));
+        assert_eq!(ticket_id_from_title(&title), Some("T-0001"));
     }
 }

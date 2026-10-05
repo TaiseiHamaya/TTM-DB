@@ -1,0 +1,6 @@
+/target
+/data
+.env
+*.env
+!deploy/*.env.example
+service-account*.json

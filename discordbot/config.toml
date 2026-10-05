@@ -1,0 +1,73 @@
+# TicketManager 設定
+# 秘匿情報 (トークン・Service Account) はここに書かず環境変数で渡すこと
+
+# シート名 (環境変数 TM_TICKETS_SHEET / TM_MASTERS_SHEET で上書き可)
+[sheets]
+tickets_sheet = "tickets"
+masters_sheet = "masters"
+# tickets シートのヘッダの行番号 (1始まり, 環境変数 TM_HEADER_ROW で上書き可)。上にタイトル行などを置く場合に変える
+# これより上の行は無視し、下の行をチケットとして読む
+header_row = 1
+
+# tickets シートの列。左が Bot 内部の論理名、右がスプシのヘッダ名。
+# 列順の入替・列追加は自由。ヘッダ名を変えたらここも合わせる
+# 省略した列は論理名をそのままヘッダ名とする。
+# 環境変数 TM_COL_<論理名の大文字> で上書き可 (例: TM_COL_TITLE=件名)
+[columns]
+required = [
+  "ticket_id", "discord_post_id", "title", "body", "status", "category",
+  "assignee", "reporter", "priority", "due_date", "created_at",
+  "updated_at", "discord_url",
+]
+
+[columns.names]
+ticket_id = "ticket_id"
+discord_post_id = "discord_post_id"
+title = "title"
+body = "body"
+status = "status"
+category = "category"
+assignee = "assignee"
+reporter = "reporter"
+priority = "priority"
+due_date = "due_date"
+parent_id = "parent_id"
+image_urls = "image_urls"
+created_at = "created_at"
+updated_at = "updated_at"
+discord_url = "discord_url"
+
+# masters シート A列のキー名
+[masters]
+status_key = "status"
+category_key = "category"
+assignee_key = "assignee"
+priority_key = "priority"
+rename_key = "rename"
+
+[sync]
+# 最後に Discord へ反映した内容ハッシュの保存先
+state_file = "data/sync_state.json"
+
+[ticket]
+id_prefix = "T-"
+id_digits = 4
+utc_offset_hours = 9
+list_limit = 20
+max_forum_tags = 20
+
+[discord]
+# スプシ構成破壊などの警告を投稿するテキストチャンネル (任意)
+# alert_channel_id = 123456789012345678
+# スプシの GAS (gas/sync.gs) が投稿する Webhook の ID。
+# Webhook URL https://discord.com/api/webhooks/<ID>/<トークン> の <ID> 部分。
+# 未設定だとスプシ側の編集は Discord に反映されない (/sync で手動反映のみ)
+# sync_webhook_id = 123456789012345678
+
+# Discord ユーザーとスプシ上の表示名の対応。
+# キーは Discord ユーザーID (推奨) またはユーザー名 (@ の後ろのハンドル)、値はスプシに書く名前。
+# 未指定のユーザーは masters の assignee 行の名前、それも無ければ Discord のサーバー表示名を使う。
+# 環境変数 TM_MEMBERS="123456789012345678=田中,alice=佐藤" で追加・上書き可
+[members]
+# "123456789012345678" = "田中"
+# alice = "佐藤"

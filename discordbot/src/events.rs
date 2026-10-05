@@ -74,7 +74,7 @@ async fn on_interaction(app: &Data, i: &Interaction) -> Result<()> {
 
 /// チケット先頭メッセージの状態変更ボタン
 async fn on_status_button(app: &Data, i: &Interaction, rest: &str) -> Result<()> {
-    // custom_id = tm:st:{ticket_id}:{role}
+    // custom_id = ttm:st:{ticket_id}:{role}
     let Some((ticket_id, role)) = rest.rsplit_once(':') else {
         return Ok(());
     };

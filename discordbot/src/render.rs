@@ -20,7 +20,7 @@ use crate::config::{Col, Config};
 use crate::masters::{Masters, StatusRole, can_transition};
 use crate::store::{Table, Ticket};
 
-pub const BUTTON_PREFIX: &str = "tm:st:";
+pub const BUTTON_PREFIX: &str = "ttm:st:";
 const FOOTER_UPDATED: &str = "更新 ";
 
 /// Post タイトル "タイトル [T-0001]"。進行度は含めない (スレッド名の変更は Discord のレート制限が

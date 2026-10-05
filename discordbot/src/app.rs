@@ -122,7 +122,7 @@ impl App {
     }
 
     /// Discord メンバーのスプシ上の表示名。
-    /// 優先順: 設定 (config.toml [members] / TM_MEMBERS) > masters の assignee > Discord 表示名
+    /// 優先順: 設定 (config.toml [members] / TTM_MEMBERS) > masters の assignee > Discord 表示名
     pub async fn sheet_name_of(&self, user_id: u64, username: &str, display_name: &str) -> String {
         if let Some(name) = self.cfg.member_name(user_id, username) {
             return name.to_owned();

@@ -1,5 +1,5 @@
 [package]
-name = "ticket-manager"
+name = "ttm-db"
 version = "0.1.0"
 edition = "2024"
 

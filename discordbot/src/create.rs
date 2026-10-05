@@ -31,9 +31,9 @@ use crate::masters::Masters;
 use crate::ops::{self, NewImage, NewTicket};
 use crate::render::{self, button, row, truncate};
 
-/// フォームの custom_id。新規は "tm:new"、修正は "tm:new:<key>"。
-/// 2段目のメッセージの部品は "tm:new:<key>:<操作>"
-pub const PREFIX: &str = "tm:new";
+/// フォームの custom_id。新規は "ttm:new"、修正は "ttm:new:<key>"。
+/// 2段目のメッセージの部品は "ttm:new:<key>:<操作>"
+pub const PREFIX: &str = "ttm:new";
 const DRAFT_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_IMAGES: u8 = 10;
 
@@ -596,6 +596,6 @@ mod tests {
         let json = serde_json::to_value(&rows).unwrap();
         assert_eq!(json[0]["components"][0]["options"][0]["default"], true);
         assert_eq!(json[1]["components"][0]["default_values"][0]["id"], "42");
-        assert_eq!(json[3]["components"][0]["custom_id"], "tm:new:k:go");
+        assert_eq!(json[3]["components"][0]["custom_id"], "ttm:new:k:go");
     }
 }

@@ -1,4 +1,4 @@
-# TicketManager 設計書
+# TTM-DB 設計書
 
 ## 1. 前提
 

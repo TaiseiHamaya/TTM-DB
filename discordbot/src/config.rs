@@ -215,38 +215,38 @@ impl Config {
     }
 
     /// 環境変数による上書き (ファイルより優先)
-    /// - TM_TICKETS_SHEET / TM_MASTERS_SHEET: シート名
-    /// - TM_HEADER_ROW: tickets シートのヘッダの行番号
-    /// - TM_COL_<論理名の大文字> (例: TM_COL_TITLE=件名): ヘッダ名
-    /// - TM_MEMBERS="<ユーザーID or ユーザー名>=<スプシ表示名>,...": 表示名の対応 (追加・上書き)
+    /// - TTM_TICKETS_SHEET / TTM_MASTERS_SHEET: シート名
+    /// - TTM_HEADER_ROW: tickets シートのヘッダの行番号
+    /// - TTM_COL_<論理名の大文字> (例: TTM_COL_TITLE=件名): ヘッダ名
+    /// - TTM_MEMBERS="<ユーザーID or ユーザー名>=<スプシ表示名>,...": 表示名の対応 (追加・上書き)
     fn apply_env(
         &mut self,
         get: impl Fn(&str) -> Option<String>,
         all: impl Iterator<Item = (String, String)>,
     ) -> Result<()> {
-        if let Some(v) = get("TM_TICKETS_SHEET") {
+        if let Some(v) = get("TTM_TICKETS_SHEET") {
             self.sheets.tickets_sheet = v;
         }
-        if let Some(v) = get("TM_MASTERS_SHEET") {
+        if let Some(v) = get("TTM_MASTERS_SHEET") {
             self.sheets.masters_sheet = v;
         }
-        if let Some(v) = get("TM_HEADER_ROW") {
+        if let Some(v) = get("TTM_HEADER_ROW") {
             self.sheets.header_row = v
                 .trim()
                 .parse()
-                .with_context(|| format!("TM_HEADER_ROW「{v}」は行番号 (1以上の整数) ではありません"))?;
+                .with_context(|| format!("TTM_HEADER_ROW「{v}」は行番号 (1以上の整数) ではありません"))?;
         }
         for (name, value) in all {
-            if let Some(key) = name.strip_prefix("TM_COL_") {
+            if let Some(key) = name.strip_prefix("TTM_COL_") {
                 let key = key.to_lowercase();
                 Col::parse(&key, &format!("環境変数 {name}"))?;
                 self.columns.names.insert(key, value);
             }
         }
-        if let Some(v) = get("TM_MEMBERS") {
+        if let Some(v) = get("TTM_MEMBERS") {
             for pair in v.split(',').map(str::trim).filter(|s| !s.is_empty()) {
                 let Some((user, sheet_name)) = pair.split_once('=') else {
-                    bail!("TM_MEMBERS の「{pair}」は <ユーザー>=<表示名> 形式ではありません");
+                    bail!("TTM_MEMBERS の「{pair}」は <ユーザー>=<表示名> 形式ではありません");
                 };
                 self.members
                     .insert(user.trim().to_owned(), sheet_name.trim().to_owned());
@@ -312,10 +312,10 @@ mod tests {
     fn env_overrides() {
         let mut cfg = Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml")).unwrap();
         let vars: HashMap<&str, &str> = [
-            ("TM_TICKETS_SHEET", "チケット"),
-            ("TM_COL_TITLE", "件名"),
-            ("TM_MEMBERS", "123=田中, alice=佐藤"),
-            ("TM_HEADER_ROW", "3"),
+            ("TTM_TICKETS_SHEET", "チケット"),
+            ("TTM_COL_TITLE", "件名"),
+            ("TTM_MEMBERS", "123=田中, alice=佐藤"),
+            ("TTM_HEADER_ROW", "3"),
         ]
         .into();
         cfg.apply_env(
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(cfg.member_id_for_name("田中"), Some(123));
         assert_eq!(cfg.member_id_for_name("佐藤"), None);
 
-        let bad: HashMap<&str, &str> = [("TM_COL_NOPE", "x")].into();
+        let bad: HashMap<&str, &str> = [("TTM_COL_NOPE", "x")].into();
         assert!(
             cfg.apply_env(
                 |n| bad.get(n).map(|s| s.to_string()),
@@ -342,7 +342,7 @@ mod tests {
         );
 
         // 廃止した列は理由付きでエラーにする
-        let removed: HashMap<&str, &str> = [("TM_COL_REPORTER_ID", "発行者ID")].into();
+        let removed: HashMap<&str, &str> = [("TTM_COL_REPORTER_ID", "発行者ID")].into();
         let err = cfg
             .apply_env(
                 |n| removed.get(n).map(|s| s.to_string()),

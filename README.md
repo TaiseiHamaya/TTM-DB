@@ -1,4 +1,4 @@
-# TicketManager
+# TTM-DB (TaskTicketManager-DiscordBot)
 
 Discord でタスクチケットの発行と状態管理を行う Bot です。台帳は Google Sheets、チケットの置き場は Forum チャンネルです。設計は [DESIGN.md](DESIGN.md) を参照してください。
 
@@ -27,7 +27,7 @@ Discord でタスクチケットの発行と状態管理を行う Bot です。�
    header_row = 3   # 1〜2行目はタイトルなど。3行目がヘッダ、4行目以降がチケット
    ```
 
-   環境変数の場合: `TM_TICKETS_SHEET=チケット` / `TM_MASTERS_SHEET=マスタ` / `TM_HEADER_ROW=3`
+   環境変数の場合: `TTM_TICKETS_SHEET=チケット` / `TTM_MASTERS_SHEET=マスタ` / `TTM_HEADER_ROW=3`
 
 2. **ヘッダ名**: `[columns.names]` に「Bot の論理名 = 台帳シートのヘッダ名」を全列分書く (`config.toml` に全15列のひな形あり)
 
@@ -39,7 +39,7 @@ Discord でタスクチケットの発行と状態管理を行う Bot です。�
    # ...残りの列も同様に
    ```
 
-   環境変数の場合: `TM_COL_<論理名の大文字>=ヘッダ名` (例: `TM_COL_TITLE=件名`)
+   環境変数の場合: `TTM_COL_<論理名の大文字>=ヘッダ名` (例: `TTM_COL_TITLE=件名`)
 
 3. **担当者名 (Discord ↔ スプシ)**: `[members]` に「Discord ユーザーID = スプシに書く名前」をメンバー全員分書く。キーはユーザー名 (@ の後ろのハンドル) でも可だが、変更されても崩れない ID を推奨
 
@@ -49,7 +49,7 @@ Discord でタスクチケットの発行と状態管理を行う Bot です。�
    "234567890123456789" = "佐藤"
    ```
 
-   環境変数の場合: `TM_MEMBERS=123456789012345678=田中,234567890123456789=佐藤`
+   環境変数の場合: `TTM_MEMBERS=123456789012345678=田中,234567890123456789=佐藤`
 
    設定に無いメンバーは、masters の assignee 行の名前、それも無ければ Discord のサーバー表示名で記録される。設定と masters の名前が食い違っていると `/sync check` で報告される
 
@@ -70,12 +70,12 @@ Bot はスプシを定期取得しません。スプシが編集されると GAS
 4. プロジェクトの設定 > スクリプト プロパティに `DISCORD_WEBHOOK_URL` = 1 の URL を追加する
 5. エディタで `setupTrigger` を1回実行し、権限を承認する (変更トリガーが作られる)
 
-以降、スプシを編集するたびに同期チャンネルへ投稿され、Bot が反映すると ✅、失敗すると ⚠ のリアクションが付きます。メニュー「TicketManager > Discord へ同期」で手動送信もできます。Bot が Sheets API で書き込んだ変更ではトリガーは動きません。
+以降、スプシを編集するたびに同期チャンネルへ投稿され、Bot が反映すると ✅、失敗すると ⚠ のリアクションが付きます。メニュー「TTM-DB > Discord へ同期」で手動送信もできます。Bot が Sheets API で書き込んだ変更ではトリガーは動きません。
 
 ### 5. 起動
 
 ```sh
-cp deploy/ticket-manager.env.example .env   # 値を埋める
+cp deploy/ttm-db.env.example .env   # 値を埋める
 set -a; . ./.env; set +a
 cargo run --release
 ```
@@ -85,16 +85,16 @@ cargo run --release
 ```sh
 # VM 上でビルド (aarch64)
 cargo build --release
-sudo useradd -r -s /usr/sbin/nologin ticketbot
-sudo mkdir -p /opt/ticket-manager/data /etc/ticket-manager
-sudo cp target/release/ticket-manager config.toml /opt/ticket-manager/
-sudo chown -R ticketbot /opt/ticket-manager
-sudo cp deploy/ticket-manager.env.example /etc/ticket-manager/ticket-manager.env  # 編集する
-sudo cp service-account.json /etc/ticket-manager/ && sudo chmod 600 /etc/ticket-manager/*
-sudo chown ticketbot /etc/ticket-manager/service-account.json
-sudo cp deploy/ticket-manager.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now ticket-manager
-journalctl -u ticket-manager -f
+sudo useradd -r -s /usr/sbin/nologin ttmdb
+sudo mkdir -p /opt/ttm-db/data /etc/ttm-db
+sudo cp target/release/ttm-db config.toml /opt/ttm-db/
+sudo chown -R ttmdb /opt/ttm-db
+sudo cp deploy/ttm-db.env.example /etc/ttm-db/ttm-db.env  # 編集する
+sudo cp service-account.json /etc/ttm-db/ && sudo chmod 600 /etc/ttm-db/*
+sudo chown ttmdb /etc/ttm-db/service-account.json
+sudo cp deploy/ttm-db.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now ttm-db
+journalctl -u ttm-db -f
 ```
 
 ## コマンド

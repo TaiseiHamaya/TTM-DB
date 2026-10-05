@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
         | EventTypeFlags::MESSAGE_CREATE
         | EventTypeFlags::MEMBER_ADD;
     let mut shard = Shard::new(ShardId::ONE, env.discord_token, intents);
-    tracing::info!("TicketManager 起動");
+    tracing::info!("TTM-DB 起動");
     while let Some(item) = shard.next_event(wanted).await {
         match item {
             Ok(event) => {

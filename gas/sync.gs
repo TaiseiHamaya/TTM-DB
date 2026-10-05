@@ -1,5 +1,5 @@
 /**
- * TicketManager: スプシが編集されたら tickets / masters シートの内容を Discord Webhook へ送る。
+ * TTM-DB: スプシが編集されたら tickets / masters シートの内容を Discord Webhook へ送る。
  * Bot は Webhook の投稿 (添付 sync.json) を受け取り、差分を Forum Post に反映する。
  *
  * セットアップ:
@@ -31,7 +31,7 @@ function setupTrigger() {
 /** 手動で送るためのメニュー */
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('TicketManager')
+    .createMenu('TTM-DB')
     .addItem('Discord へ同期', 'pushToDiscord')
     .addToUi();
 }
@@ -65,7 +65,7 @@ function pushToDiscord() {
     const rows = snapshot.tickets ? Math.max(snapshot.tickets.length - 1, 0) : 0;
     const payload = {
       payload_json: JSON.stringify({
-        content: `TicketManager sync: tickets ${rows}行`,
+        content: `TTM-DB sync: tickets ${rows}行`,
         allowed_mentions: { parse: [] },
       }),
       'files[0]': Utilities.newBlob(JSON.stringify(snapshot), 'application/json', 'sync.json'),

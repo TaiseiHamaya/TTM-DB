@@ -528,9 +528,9 @@ async fn set_halted(app: &App, reason: Option<String>) {
     }
     let msg = match &reason {
         Some(r) => {
-            format!("🚨 TicketManager: {r}\n同期を停止しました。列を元に戻すと自動で再開します。")
+            format!("🚨 TTM-DB: {r}\n同期を停止しました。列を元に戻すと自動で再開します。")
         }
-        None => "✅ TicketManager: スプシの構成が正常に戻ったため同期を再開しました。".to_owned(),
+        None => "✅ TTM-DB: スプシの構成が正常に戻ったため同期を再開しました。".to_owned(),
     };
     match &reason {
         Some(r) => tracing::error!(reason = %r, "同期停止"),

@@ -1,0 +1,16 @@
+[Unit]
+Description=TTM-DB (TaskTicketManager-DiscordBot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ttmdb
+WorkingDirectory=/opt/ttm-db
+EnvironmentFile=/etc/ttm-db/ttm-db.env
+ExecStart=/opt/ttm-db/ttm-db
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -385,16 +385,7 @@ pub async fn change_status(
 
     let now = app.cfg.now();
     let mut changes = vec![(Col::Status, to_name.clone()), (Col::UpdatedAt, now)];
-    // 着手日は最初に着手中にした日を残す (差戻しでは上書きしない)
-    if target == StatusRole::InProgress && t.get(Col::StartedAt).is_empty() {
-        changes.push((Col::StartedAt, app.cfg.today()));
-    }
-    // 完了日は完了にした日。差戻しで空に戻し、再度の完了で付け直す
-    if target == StatusRole::Done {
-        changes.push((Col::CompletedAt, app.cfg.today()));
-    } else if from == StatusRole::Done && !t.get(Col::CompletedAt).is_empty() {
-        changes.push((Col::CompletedAt, String::new()));
-    }
+    changes.extend(status_date_changes(&t, Some(from), target, &app.cfg.today(), true));
     app.store().update(&table, t.row, t.id(), &changes).await?;
     let mut updated = t.clone();
     for (col, v) in changes {
@@ -428,6 +419,61 @@ pub async fn change_status(
         from: from_name,
         to: to_name,
     })
+}
+
+/// 進行度を from から to に変えたときに付け直す着手日・完了日。
+/// overwrite_completed が false なら、既に入っている完了日は上書きしない (スプシで手入力された値を残す)
+fn status_date_changes(
+    t: &Ticket,
+    from: Option<StatusRole>,
+    to: StatusRole,
+    today: &str,
+    overwrite_completed: bool,
+) -> Vec<(Col, String)> {
+    let mut changes = Vec::new();
+    // 着手日は最初に着手中にした日を残す (差戻しでは上書きしない)
+    if to == StatusRole::InProgress && t.get(Col::StartedAt).is_empty() {
+        changes.push((Col::StartedAt, today.to_owned()));
+    }
+    // 完了日は完了にした日。差戻しで空に戻し、再度の完了で付け直す
+    if to == StatusRole::Done {
+        if overwrite_completed || t.get(Col::CompletedAt).is_empty() {
+            changes.push((Col::CompletedAt, today.to_owned()));
+        }
+    } else if from == Some(StatusRole::Done) && !t.get(Col::CompletedAt).is_empty() {
+        changes.push((Col::CompletedAt, String::new()));
+    }
+    changes
+}
+
+/// スプシで進行度が変えられていれば、着手日・完了日をシートに書き込んで返す
+async fn fill_status_dates(
+    app: &App,
+    table: &Table,
+    prev: &HashMap<String, String>,
+    t: &Ticket,
+) -> Result<Option<Ticket>> {
+    let prev_status = prev.get(Col::Status.key()).map_or("", String::as_str);
+    if prev_status == t.get(Col::Status) {
+        return Ok(None);
+    }
+    let m = app.masters.read().await.clone();
+    let Some(to) = m.role_of(t.get(Col::Status)) else {
+        return Ok(None);
+    };
+    let from = m.role_of(prev_status);
+    let mut changes = status_date_changes(t, from, to, &app.cfg.today(), false);
+    // 同じ編集で日付も手入力されていれば、そちらを優先する
+    changes.retain(|(col, _)| prev.get(col.key()).map_or("", String::as_str) == t.get(*col));
+    if changes.is_empty() {
+        return Ok(None);
+    }
+    app.store().update(table, t.row, t.id(), &changes).await?;
+    let mut updated = t.clone();
+    for (col, v) in changes {
+        updated.set(col, v);
+    }
+    Ok(Some(updated))
 }
 
 /// a が b より新しいか (ISO8601 として比較。解釈できなければ文字列の不一致で判定)
@@ -604,6 +650,17 @@ pub async fn sync_one(app: &App, ticket_id: &str) -> Result<()> {
 /// スプシの内容を Discord に反映し、前回反映時から変わった列を Post に投稿する
 async fn push_from_sheets(app: &App, table: &Table, t: &Ticket) -> Result<()> {
     let prev = app.sync_state.lock().await.values.get(t.id()).cloned();
+    // スプシで進行度が変えられたときも、Discord での変更と同じく着手日・完了日を付ける
+    let filled = match &prev {
+        Some(prev) => fill_status_dates(app, table, prev, t)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(ticket_id = %t.id(), error = %e, "着手日・完了日の書き込みに失敗");
+                None
+            }),
+        None => None,
+    };
+    let t = filled.as_ref().unwrap_or(t);
     push_ticket(app, table, t).await?;
     // 前回の値が無い (新規 Post・記録前) ときは差分が分からないため投稿しない
     let (Some(prev), Some(post_id)) = (prev, t.post_id()) else {
@@ -811,6 +868,48 @@ mod tests {
         // ヘッダ行の指定がずれていればスキーマエラー
         cfg.sheets.header_row = 1;
         assert!(Table::from_rows(&rows, &cfg).is_err());
+    }
+
+    #[test]
+    fn status_dates() {
+        use StatusRole::*;
+        let cfg =
+            crate::config::Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"))
+                .unwrap();
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let rows = vec![
+            s(&[
+                "ticket_id", "discord_post_id", "title", "body", "status", "category", "assignee",
+                "reporter", "priority", "due_date", "created_at", "updated_at", "discord_url",
+                "started_at", "completed_at",
+            ]),
+            s(&["T-0001", "", "件名", "詳細", "未着手", "バグ・違和感", "田中", "佐藤", "高"]),
+        ];
+        let mut t = Table::from_rows(&rows, &cfg).unwrap().tickets.remove(0);
+        let today = "2026-10-09";
+        let d = |c: Col| (c, today.to_owned());
+
+        assert_eq!(
+            status_date_changes(&t, Some(Initial), InProgress, today, false),
+            vec![d(Col::StartedAt)]
+        );
+        assert_eq!(
+            status_date_changes(&t, Some(InProgress), Done, today, false),
+            vec![d(Col::CompletedAt)]
+        );
+        // 着手日は残し、完了日は手入力済みなら上書きしない
+        t.set(Col::StartedAt, "2026-10-01");
+        t.set(Col::CompletedAt, "2026-10-05");
+        assert!(status_date_changes(&t, Some(Done), Done, today, false).is_empty());
+        assert_eq!(
+            status_date_changes(&t, Some(InProgress), Done, today, true),
+            vec![d(Col::CompletedAt)]
+        );
+        // 完了から差戻すと完了日を空に戻す
+        assert_eq!(
+            status_date_changes(&t, Some(Done), InProgress, today, false),
+            vec![(Col::CompletedAt, String::new())]
+        );
     }
 
     #[test]

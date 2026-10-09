@@ -139,6 +139,8 @@ pub struct Config {
     pub ticket: TicketConfig,
     #[serde(default)]
     pub discord: DiscordConfig,
+    #[serde(default)]
+    pub tags: TagsConfig,
     /// Discord ユーザー -> スプシ上の表示名。キーは Discord ユーザーID またはユーザー名
     #[serde(default)]
     pub members: HashMap<String, String>,
@@ -198,6 +200,40 @@ pub struct TicketConfig {
 pub struct DiscordConfig {
     /// スキーマ破壊などの警告を投稿するテキストチャンネル。未設定ならログのみ
     pub alert_channel_id: Option<u64>,
+}
+
+/// Forum タグ名の接頭辞 (どの要素のタグかを示す)。タグ名は「接頭辞 + masters の値」になる
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TagsConfig {
+    pub status_prefix: String,
+    pub category_prefix: String,
+    pub priority_prefix: String,
+    pub assignee_prefix: String,
+}
+
+impl Default for TagsConfig {
+    fn default() -> Self {
+        Self {
+            status_prefix: "進行度:".into(),
+            category_prefix: "種類:".into(),
+            priority_prefix: "優先度:".into(),
+            assignee_prefix: "担当:".into(),
+        }
+    }
+}
+
+impl TagsConfig {
+    /// タグにする列の接頭辞 (タグにしない列は空)
+    pub fn prefix(&self, col: Col) -> &str {
+        match col {
+            Col::Status => &self.status_prefix,
+            Col::Category => &self.category_prefix,
+            Col::Priority => &self.priority_prefix,
+            Col::Assignee => &self.assignee_prefix,
+            _ => "",
+        }
+    }
 }
 
 impl Config {

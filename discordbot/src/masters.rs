@@ -7,7 +7,7 @@
 
 use anyhow::{Result, bail};
 
-use crate::config::Config;
+use crate::config::{Col, Config};
 use crate::sheets::{Sheets, quote_sheet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,16 +181,20 @@ impl Masters {
             .unwrap_or(usize::MAX)
     }
 
-    /// Forum タグにする名前 (進行度, 種類, 優先度, 担当者の順。上限を超える担当者はタグ化しない)
-    pub fn tag_names(&self, max: usize) -> Vec<String> {
-        let mut names: Vec<String> = self.statuses.iter().map(|s| s.name.clone()).collect();
-        names.extend(self.categories.iter().cloned());
-        names.extend(self.priorities.iter().cloned());
-        names.extend(self.assignees.iter().map(|a| a.name.clone()));
+    /// Forum タグにする (列, 値) (進行度, 種類, 優先度, 担当者の順。上限を超える担当者はタグ化しない)
+    pub fn tag_values(&self, max: usize) -> Vec<(Col, String)> {
+        let mut values: Vec<(Col, String)> = self
+            .statuses
+            .iter()
+            .map(|s| (Col::Status, s.name.clone()))
+            .collect();
+        values.extend(self.categories.iter().map(|c| (Col::Category, c.clone())));
+        values.extend(self.priorities.iter().map(|p| (Col::Priority, p.clone())));
+        values.extend(self.assignees.iter().map(|a| (Col::Assignee, a.name.clone())));
         let mut seen = std::collections::HashSet::new();
-        names.retain(|n| seen.insert(n.clone()));
-        names.truncate(max);
-        names
+        values.retain(|v| seen.insert(v.clone()));
+        values.truncate(max);
+        values
     }
 
     /// masters シートに担当者を追記する
@@ -258,11 +262,12 @@ mod tests {
         let cfg = Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml")).unwrap();
         let m = Masters::parse(&rows(&sample()), &cfg).unwrap();
         assert_eq!(m.status_by_role(Done).name, "完了");
-        let tags = m.tag_names(20);
+        let tags = m.tag_values(20);
         // 進行度5 + 種類6 + 優先度4 + 担当者5 = 20
         assert_eq!(tags.len(), 20);
-        assert_eq!(&tags[11..15], ["緊急", "高", "中", "低"]);
-        assert_eq!(tags[19], "E");
+        let priorities: Vec<&str> = tags[11..15].iter().map(|(_, v)| v.as_str()).collect();
+        assert_eq!(priorities, ["緊急", "高", "中", "低"]);
+        assert_eq!(tags[19], (Col::Assignee, "E".to_string()));
     }
 
     #[test]

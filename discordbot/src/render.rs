@@ -283,16 +283,17 @@ pub fn starter_content(t: &Ticket, m: &Masters, cfg: &Config) -> String {
     format!("担当: {}", assignee_label(t, m, cfg))
 }
 
-/// Forum タグ名 (Discord の上限 20 文字に切り詰める)
-fn tag_name(name: &str) -> String {
-    truncate(name, 20)
+/// Forum タグ名。どの要素かの接頭辞を付け、Discord の上限 20 文字に切り詰める
+fn tag_name(cfg: &Config, col: Col, value: &str) -> String {
+    truncate(&format!("{}{value}", cfg.tags.prefix(col)), 20)
 }
 
 pub async fn applied_tags(app: &App, t: &Ticket) -> Vec<Id<TagMarker>> {
     let tags = app.tags.read().await;
     [Col::Status, Col::Category, Col::Priority, Col::Assignee]
         .into_iter()
-        .filter_map(|c| tags.get(&tag_name(t.get(c))).copied())
+        .filter(|&c| !t.get(c).is_empty())
+        .filter_map(|c| tags.get(&tag_name(&app.cfg, c, t.get(c))).copied())
         .collect()
 }
 
@@ -320,7 +321,23 @@ async fn put_forum_tags(app: &App, tags: Vec<serde_json::Value>) -> Result<()> {
     Ok(())
 }
 
+/// `from` という名前のタグを `to` に変更する (ID は維持)。`to` が既にあれば何もしない
+fn rename_tag(existing: &mut [ForumTag], from: &str, to: &str, report: &mut Vec<String>) -> bool {
+    if from == to || existing.iter().any(|t| t.name == to) {
+        return false;
+    }
+    match existing.iter_mut().find(|t| t.name == from) {
+        Some(tag) => {
+            tag.name = to.to_owned();
+            report.push(format!("タグ名変更: {from} → {to}"));
+            true
+        }
+        None => false,
+    }
+}
+
 /// masters を元に不足している Forum タグを追加し、タグ名 -> ID の対応を更新する。
+/// 接頭辞の無い旧形式のタグは接頭辞付きの名前に変更する (ID は維持)。
 /// `/sync tags` (cleanup = true) では、旧名→新名の rename 指定でタグ名を変更し (ID は維持)、
 /// masters に無くなったタグを削除して上限の枠を空ける
 pub async fn sync_forum_tags(app: &App, cleanup: bool) -> Result<Vec<String>> {
@@ -329,22 +346,34 @@ pub async fn sync_forum_tags(app: &App, cleanup: bool) -> Result<Vec<String>> {
     let mut existing = forum_tags(app).await?;
     let mut report = Vec::new();
     let mut changed = false;
+    let wanted: Vec<(Col, String)> = m.tag_values(max);
+    let wanted_names: Vec<String> = wanted
+        .iter()
+        .map(|(c, v)| tag_name(&app.cfg, *c, v))
+        .collect();
 
     if cleanup {
         for (old, new) in &m.renames {
-            if existing.iter().any(|t| &t.name == new) {
-                continue;
-            }
-            if let Some(tag) = existing.iter_mut().find(|t| &t.name == old) {
-                tag.name = new.clone();
-                changed = true;
-                report.push(format!("タグ名変更: {old} → {new}"));
+            for (col, _) in wanted.iter().filter(|(_, v)| v == new) {
+                let to = tag_name(&app.cfg, *col, new);
+                changed |= rename_tag(&mut existing, &tag_name(&app.cfg, *col, old), &to, &mut report);
+                // 接頭辞を付ける前の旧名のタグ
+                changed |= rename_tag(&mut existing, &truncate(old, 20), &to, &mut report);
             }
         }
+    }
+    // 接頭辞を付ける前のタグ名 (値そのまま) を接頭辞付きに移行する。付与済みのタグは ID で残る
+    for ((_, value), name) in wanted.iter().zip(&wanted_names) {
+        let legacy = truncate(value, 20);
+        if !wanted_names.contains(&legacy) {
+            changed |= rename_tag(&mut existing, &legacy, name, &mut report);
+        }
+    }
+
+    if cleanup {
         // 統合された種類 (rename の新名が既にある旧名) や廃止された進行度のタグ
-        let wanted: Vec<String> = m.tag_names(max).iter().map(|n| tag_name(n)).collect();
         existing.retain(|t| {
-            let keep = wanted.contains(&t.name);
+            let keep = wanted_names.contains(&t.name);
             if !keep {
                 changed = true;
                 report.push(format!("タグ削除: {}", t.name));
@@ -357,7 +386,7 @@ pub async fn sync_forum_tags(app: &App, cleanup: bool) -> Result<Vec<String>> {
         .iter()
         .map(|t| serde_json::to_value(t).unwrap_or_else(|_| json!({ "id": t.id, "name": t.name })))
         .collect();
-    for name in m.tag_names(max).iter().map(|n| tag_name(n)) {
+    for name in wanted_names {
         if values.len() >= max {
             break;
         }

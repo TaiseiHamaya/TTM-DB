@@ -106,10 +106,11 @@ impl Sheets {
     /// シートの行数 (値の有無に関わらずグリッドの行数)
     pub async fn row_count(&self, sheet: &str) -> Result<usize> {
         let body = self
-            .send(self.http.get(self.url(&[])).query(&[(
-                "fields",
-                "sheets.properties(title,gridProperties.rowCount)",
-            )]))
+            .send(
+                self.http
+                    .get(self.url(&[]))
+                    .query(&[("fields", "sheets.properties(title,gridProperties.rowCount)")]),
+            )
             .await?;
         body["sheets"]
             .as_array()
@@ -125,7 +126,12 @@ impl Sheets {
     /// `start_row` 行目から始まる表の末尾に1行追加し、追加された行番号 (1始まり) を返す。
     /// 表の上にタイトル行などがあっても、その下に誤って追加しないよう開始行を指定する。
     /// 値は文字列のまま書く (RAW)
-    pub async fn append_row(&self, sheet: &str, start_row: usize, row: Vec<String>) -> Result<usize> {
+    pub async fn append_row(
+        &self,
+        sheet: &str,
+        start_row: usize,
+        row: Vec<String>,
+    ) -> Result<usize> {
         let range = format!("{}!A{start_row}", quote_sheet(sheet));
         let url = self.url(&["values", &format!("{range}:append")]);
         let body = self

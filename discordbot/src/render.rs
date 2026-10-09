@@ -119,7 +119,10 @@ pub fn embed(t: &Ticket, table: &Table, m: &Masters, cfg: &Config) -> Embed {
         .field(field("担当者", or_dash(&assignee_label(t, m, cfg))))
         .field(field("優先度", or_dash(t.get(Col::Priority))))
         .field(field("期限", or_dash(t.get(Col::DueDate))))
-        .field(field("発行者", or_dash(&user_label(Col::Reporter, t, m, cfg))));
+        .field(field(
+            "発行者",
+            or_dash(&user_label(Col::Reporter, t, m, cfg)),
+        ));
     let parent = t.get(Col::ParentId);
     if !parent.is_empty() {
         let v = table
@@ -130,7 +133,10 @@ pub fn embed(t: &Ticket, table: &Table, m: &Masters, cfg: &Config) -> Embed {
     }
     let children: Vec<String> = table.children_of(t.id()).map(link).collect();
     if !children.is_empty() {
-        e = e.field(EmbedFieldBuilder::new("子チケット", truncate(&children.join(" "), 1000)));
+        e = e.field(EmbedFieldBuilder::new(
+            "子チケット",
+            truncate(&children.join(" "), 1000),
+        ));
     }
     let images = t.image_urls();
     if !images.is_empty() {
@@ -257,7 +263,10 @@ pub fn changes_content(
     }
     let show = |col: Col, v: &str| -> String {
         match col {
-            Col::Body => or_dash(&truncate(&v.split_whitespace().collect::<Vec<_>>().join(" "), 200)),
+            Col::Body => or_dash(&truncate(
+                &v.split_whitespace().collect::<Vec<_>>().join(" "),
+                200,
+            )),
             _ => or_dash(&truncate(v, 100)),
         }
     };
@@ -272,7 +281,10 @@ pub fn changes_content(
         ));
     }
     // 担当者か進行度が変わったときは担当者に知らせる
-    if cols.iter().any(|c| matches!(c, Col::Assignee | Col::Status)) {
+    if cols
+        .iter()
+        .any(|c| matches!(c, Col::Assignee | Col::Status))
+    {
         lines.push(format!("担当: {}", assignee_label(t, m, cfg)));
     }
     Some(truncate(&lines.join("\n"), 2000))
@@ -356,7 +368,12 @@ pub async fn sync_forum_tags(app: &App, cleanup: bool) -> Result<Vec<String>> {
         for (old, new) in &m.renames {
             for (col, _) in wanted.iter().filter(|(_, v)| v == new) {
                 let to = tag_name(&app.cfg, *col, new);
-                changed |= rename_tag(&mut existing, &tag_name(&app.cfg, *col, old), &to, &mut report);
+                changed |= rename_tag(
+                    &mut existing,
+                    &tag_name(&app.cfg, *col, old),
+                    &to,
+                    &mut report,
+                );
                 // 接頭辞を付ける前の旧名のタグ
                 changed |= rename_tag(&mut existing, &truncate(old, 20), &to, &mut report);
             }
@@ -413,7 +430,10 @@ mod tests {
     #[test]
     fn id_from_title() {
         assert_eq!(ticket_id_from_title("ログイン [T-0001]"), Some("T-0001"));
-        assert_eq!(ticket_id_from_title("[仮] ログイン [T-0001]"), Some("T-0001"));
+        assert_eq!(
+            ticket_id_from_title("[仮] ログイン [T-0001]"),
+            Some("T-0001")
+        );
         assert_eq!(ticket_id_from_title("雑談"), None);
         assert_eq!(ticket_id_from_title("x []"), None);
     }
@@ -423,7 +443,10 @@ mod tests {
         let cfg = Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml")).unwrap();
         let long = "あ".repeat(200);
         let rows = vec![
-            cfg.required_cols().iter().map(|c| cfg.header(*c).to_owned()).collect::<Vec<_>>(),
+            cfg.required_cols()
+                .iter()
+                .map(|c| cfg.header(*c).to_owned())
+                .collect::<Vec<_>>(),
             cfg.required_cols()
                 .iter()
                 .map(|c| match c {
@@ -456,7 +479,9 @@ mod tests {
                 .collect()
         };
         let rows = vec![
-            cols.iter().map(|c| cfg.header(*c).to_owned()).collect::<Vec<_>>(),
+            cols.iter()
+                .map(|c| cfg.header(*c).to_owned())
+                .collect::<Vec<_>>(),
             row("タイトル", "旧", "a"),
             row("別タイトル", "新", "b"),
         ];

@@ -190,7 +190,11 @@ impl Masters {
             .collect();
         values.extend(self.categories.iter().map(|c| (Col::Category, c.clone())));
         values.extend(self.priorities.iter().map(|p| (Col::Priority, p.clone())));
-        values.extend(self.assignees.iter().map(|a| (Col::Assignee, a.name.clone())));
+        values.extend(
+            self.assignees
+                .iter()
+                .map(|a| (Col::Assignee, a.name.clone())),
+        );
         let mut seen = std::collections::HashSet::new();
         values.retain(|v| seen.insert(v.clone()));
         values.truncate(max);
@@ -245,7 +249,14 @@ mod tests {
             ("status", "中断", ""),
             ("status", "破棄", ""),
         ];
-        for c in ["実装", "アセット", "エンジン", "演出", "企画", "バグ・違和感"] {
+        for c in [
+            "実装",
+            "アセット",
+            "エンジン",
+            "演出",
+            "企画",
+            "バグ・違和感",
+        ] {
             spec.push(("category", c, ""));
         }
         for p in ["緊急", "高", "中", "低"] {

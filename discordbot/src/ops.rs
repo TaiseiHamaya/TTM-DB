@@ -237,7 +237,11 @@ pub async fn push_ticket(app: &App, table: &Table, t: &Ticket) -> Result<()> {
             {
                 let _ = app
                     .http
-                    .delete_current_user_reaction(Id::new(post_id), Id::new(post_id), &FAIL_REACTION)
+                    .delete_current_user_reaction(
+                        Id::new(post_id),
+                        Id::new(post_id),
+                        &FAIL_REACTION,
+                    )
                     .await;
             }
         }
@@ -259,7 +263,11 @@ pub async fn push_ticket(app: &App, table: &Table, t: &Ticket) -> Result<()> {
                         "⚠ 同期に失敗しました。`/sync ticket id:{}` で再試行してください。",
                         t.id()
                     );
-                    let _ = app.http.create_message(Id::new(post_id)).content(&text).await;
+                    let _ = app
+                        .http
+                        .create_message(Id::new(post_id))
+                        .content(&text)
+                        .await;
                 }
             }
         }
@@ -385,7 +393,13 @@ pub async fn change_status(
 
     let now = app.cfg.now();
     let mut changes = vec![(Col::Status, to_name.clone()), (Col::UpdatedAt, now)];
-    changes.extend(status_date_changes(&t, Some(from), target, &app.cfg.today(), true));
+    changes.extend(status_date_changes(
+        &t,
+        Some(from),
+        target,
+        &app.cfg.today(),
+        true,
+    ));
     app.store().update(&table, t.row, t.id(), &changes).await?;
     let mut updated = t.clone();
     for (col, v) in changes {
@@ -553,10 +567,7 @@ pub async fn alert(app: &App, msg: String) {
 }
 
 /// スキーマ検査の結果を同期停止状態に反映する。スキーマ破壊なら None
-async fn check_schema(
-    app: &App,
-    table: Result<Table>,
-) -> Result<Option<Table>> {
+async fn check_schema(app: &App, table: Result<Table>) -> Result<Option<Table>> {
     match table {
         Ok(t) => {
             set_halted(app, None).await;
@@ -613,7 +624,10 @@ async fn sync_table(app: &App, table: &Table, force: bool) -> Result<usize> {
         let hash = t.content_hash();
         let (last, has_values) = {
             let st = app.sync_state.lock().await;
-            (st.hashes.get(t.id()).copied(), st.values.contains_key(t.id()))
+            (
+                st.hashes.get(t.id()).copied(),
+                st.values.contains_key(t.id()),
+            )
         };
         let need =
             force || t.post_id().is_none() || (last != Some(hash) && !(fresh && last.is_none()));
@@ -673,9 +687,7 @@ async fn push_from_sheets(app: &App, table: &Table, t: &Ticket) -> Result<()> {
     let notify_assignee = render::changed_cols(&prev, t)
         .iter()
         .any(|c| matches!(c, Col::Assignee | Col::Status));
-    let mention = mention_only(
-        render::assignee_user(t, &m, &app.cfg).filter(|_| notify_assignee),
-    );
+    let mention = mention_only(render::assignee_user(t, &m, &app.cfg).filter(|_| notify_assignee));
     tracing::info!(
         ticket_id = %t.id(),
         discord_post_id = post_id,
@@ -799,11 +811,7 @@ pub async fn sync_tags(app: &App) -> Result<Vec<String>> {
 }
 
 /// サーバー参加者を masters に追記し、タグを追加する
-pub async fn add_member(
-    app: &App,
-    user_id: u64,
-    name: &str,
-) -> Result<bool> {
+pub async fn add_member(app: &App, user_id: u64, name: &str) -> Result<bool> {
     if app.masters.read().await.assignee_by_id(user_id).is_some() {
         return Ok(false);
     }
@@ -835,15 +843,36 @@ mod tests {
         cfg.sheets.header_row = 3;
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         let header = s(&[
-            "ticket_id", "discord_post_id", "title", "body", "status", "category", "assignee",
-            "reporter", "priority", "due_date", "created_at", "updated_at", "discord_url",
+            "ticket_id",
+            "discord_post_id",
+            "title",
+            "body",
+            "status",
+            "category",
+            "assignee",
+            "reporter",
+            "priority",
+            "due_date",
+            "created_at",
+            "updated_at",
+            "discord_url",
             "started_at",
         ]);
         let rows = vec![
             s(&["チケット台帳"]),
             Vec::new(),
             header,
-            s(&["T-0001", "", "件名", "詳細", "未着手", "バグ・違和感", "田中", "佐藤", "高"]),
+            s(&[
+                "T-0001",
+                "",
+                "件名",
+                "詳細",
+                "未着手",
+                "バグ・違和感",
+                "田中",
+                "佐藤",
+                "高",
+            ]),
         ];
         let table = Table::from_rows(&rows, &cfg).unwrap();
         assert_eq!(table.tickets.len(), 1);
@@ -873,17 +902,38 @@ mod tests {
     #[test]
     fn status_dates() {
         use StatusRole::*;
-        let cfg =
-            crate::config::Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"))
-                .unwrap();
+        let cfg = crate::config::Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"))
+            .unwrap();
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         let rows = vec![
             s(&[
-                "ticket_id", "discord_post_id", "title", "body", "status", "category", "assignee",
-                "reporter", "priority", "due_date", "created_at", "updated_at", "discord_url",
-                "started_at", "completed_at",
+                "ticket_id",
+                "discord_post_id",
+                "title",
+                "body",
+                "status",
+                "category",
+                "assignee",
+                "reporter",
+                "priority",
+                "due_date",
+                "created_at",
+                "updated_at",
+                "discord_url",
+                "started_at",
+                "completed_at",
             ]),
-            s(&["T-0001", "", "件名", "詳細", "未着手", "バグ・違和感", "田中", "佐藤", "高"]),
+            s(&[
+                "T-0001",
+                "",
+                "件名",
+                "詳細",
+                "未着手",
+                "バグ・違和感",
+                "田中",
+                "佐藤",
+                "高",
+            ]),
         ];
         let mut t = Table::from_rows(&rows, &cfg).unwrap().tickets.remove(0);
         let today = "2026-10-09";

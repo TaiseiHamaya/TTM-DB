@@ -14,7 +14,10 @@ use crate::render::truncate;
 /// Discord のメッセージ本文の上限
 pub const CONTENT_MAX: usize = 2000;
 
-pub fn response(kind: InteractionResponseType, data: InteractionResponseData) -> InteractionResponse {
+pub fn response(
+    kind: InteractionResponseType,
+    data: InteractionResponseData,
+) -> InteractionResponse {
     InteractionResponse {
         kind,
         data: Some(data),

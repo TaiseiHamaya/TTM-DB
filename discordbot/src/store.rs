@@ -201,7 +201,10 @@ impl Store<'_> {
             .last()
             .map_or(self.cfg.sheets.header_row, |t| t.row)
             + 1;
-        let row_count = self.sheets.row_count(&self.cfg.sheets.tickets_sheet).await?;
+        let row_count = self
+            .sheets
+            .row_count(&self.cfg.sheets.tickets_sheet)
+            .await?;
         if row > row_count {
             tracing::warn!(
                 sheets_row = row,
@@ -218,13 +221,25 @@ impl Store<'_> {
             }
             let row = self
                 .sheets
-                .append_row(&self.cfg.sheets.tickets_sheet, self.cfg.sheets.header_row, cells)
+                .append_row(
+                    &self.cfg.sheets.tickets_sheet,
+                    self.cfg.sheets.header_row,
+                    cells,
+                )
                 .await?;
-            let dates: Vec<_> = values.iter().filter(|(c, _)| is_date(*c)).cloned().collect();
+            let dates: Vec<_> = values
+                .iter()
+                .filter(|(c, _)| is_date(*c))
+                .cloned()
+                .collect();
             self.write_cells(table, row, &dates).await?;
             return Ok(row);
         }
-        let values: Vec<_> = values.iter().filter(|(_, v)| !v.is_empty()).cloned().collect();
+        let values: Vec<_> = values
+            .iter()
+            .filter(|(_, v)| !v.is_empty())
+            .cloned()
+            .collect();
         self.write_cells(table, row, &values).await?;
         Ok(row)
     }

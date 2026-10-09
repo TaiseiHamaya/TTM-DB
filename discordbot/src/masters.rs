@@ -8,7 +8,7 @@
 use anyhow::{Result, bail};
 
 use crate::config::Config;
-use crate::sheets::{Sheets, quote_sheet, text};
+use crate::sheets::{Sheets, quote_sheet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusRole {
@@ -200,9 +200,9 @@ impl Masters {
                 &cfg.sheets.masters_sheet,
                 1,
                 vec![
-                    text(&cfg.masters.assignee_key),
-                    text(name),
-                    text(&id.to_string()),
+                    cfg.masters.assignee_key.clone(),
+                    name.into(),
+                    id.to_string(),
                 ],
             )
             .await?;

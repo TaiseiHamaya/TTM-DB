@@ -119,7 +119,7 @@ impl Sheets {
 
     /// `start_row` 行目から始まる表の末尾に1行追加し、追加された行番号 (1始まり) を返す。
     /// 表の上にタイトル行などがあっても、その下に誤って追加しないよう開始行を指定する。
-    /// 値は USER_ENTERED で解釈されるので、文字列は `text` で包んで渡す
+    /// 値は文字列のまま書く (RAW)
     pub async fn append_row(&self, sheet: &str, start_row: usize, row: Vec<String>) -> Result<usize> {
         let range = format!("{}!A{start_row}", quote_sheet(sheet));
         let url = self.url(&["values", &format!("{range}:append")]);
@@ -128,7 +128,7 @@ impl Sheets {
                 self.http
                     .post(url)
                     .query(&[
-                        ("valueInputOption", "USER_ENTERED"),
+                        ("valueInputOption", Input::Raw.as_str()),
                         ("insertDataOption", "INSERT_ROWS"),
                     ])
                     .json(&json!({ "values": [row] })),
@@ -140,9 +140,8 @@ impl Sheets {
         parse_row_of_range(updated).context("updatedRange の行番号を解釈できません")
     }
 
-    /// 複数セルを個別に更新する。(A1範囲, 値) の組。未指定セルには触れない。
-    /// 値は USER_ENTERED で解釈されるので、文字列は `text` で包んで渡す
-    pub async fn update_cells(&self, cells: Vec<(String, String)>) -> Result<()> {
+    /// 複数セルを個別に更新する。(A1範囲, 値) の組。未指定セルには触れない
+    pub async fn update_cells(&self, cells: Vec<(String, String)>, input: Input) -> Result<()> {
         if cells.is_empty() {
             return Ok(());
         }
@@ -154,7 +153,7 @@ impl Sheets {
         self.send(
             self.http
                 .post(url)
-                .json(&json!({ "valueInputOption": "USER_ENTERED", "data": data })),
+                .json(&json!({ "valueInputOption": input.as_str(), "data": data })),
         )
         .await?;
         Ok(())
@@ -169,13 +168,21 @@ fn value_to_string(v: Value) -> String {
     }
 }
 
-/// USER_ENTERED で書く値を文字列に固定する (先頭の ' はセルの値に含まれない)。
-/// 数式・数値・日付として解釈されるのを防ぐ。空なら空のまま (セルを空にする)
-pub fn text(v: &str) -> String {
-    if v.is_empty() {
-        String::new()
-    } else {
-        format!("'{v}")
+/// 書き込む値の解釈方法
+#[derive(Clone, Copy)]
+pub enum Input {
+    /// 文字列のまま書く。数式・数値・日付として解釈されない
+    Raw,
+    /// 手入力と同様に解釈させる (日付を日付として書く)
+    UserEntered,
+}
+
+impl Input {
+    fn as_str(self) -> &'static str {
+        match self {
+            Input::Raw => "RAW",
+            Input::UserEntered => "USER_ENTERED",
+        }
     }
 }
 

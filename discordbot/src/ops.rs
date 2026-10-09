@@ -434,6 +434,12 @@ pub async fn change_status(
     if target == StatusRole::InProgress && t.get(Col::StartedAt).is_empty() {
         changes.push((Col::StartedAt, app.cfg.today()));
     }
+    // 完了日は完了にした日。差戻しで空に戻し、再度の完了で付け直す
+    if target == StatusRole::Done {
+        changes.push((Col::CompletedAt, app.cfg.today()));
+    } else if from == StatusRole::Done && !t.get(Col::CompletedAt).is_empty() {
+        changes.push((Col::CompletedAt, String::new()));
+    }
     app.store().update(&table, t.row, t.id(), &changes).await?;
     let mut updated = t.clone();
     for (col, v) in changes {
@@ -828,6 +834,7 @@ mod tests {
         let header = s(&[
             "ticket_id", "discord_post_id", "title", "body", "status", "category", "assignee",
             "reporter", "priority", "due_date", "created_at", "updated_at", "discord_url",
+            "started_at",
         ]);
         let rows = vec![
             s(&["チケット台帳"]),
@@ -842,15 +849,18 @@ mod tests {
         assert_eq!(table.next_id(&cfg), "T-0002");
 
         // 書式設定済みの空行 (未知列のチェックボックス初期値だけがある行) はチケットにしない。
-        // 期限は表示形式に依らず YYYY-MM-DD で読む
+        // 期限・着手日は表示形式に依らず YYYY-MM-DD で読む
         let mut rows = rows;
-        rows[3].push("2026/10/9".into());
-        let mut blank = vec![String::new(); 13];
+        rows[3].resize(13, String::new());
+        rows[3][9] = "2026/10/9".into();
+        rows[3].push("2026/10/8".into());
+        let mut blank = vec![String::new(); 14];
         blank.push("FALSE".into());
         rows.push(blank);
         let table = Table::from_rows(&rows, &cfg).unwrap();
         assert_eq!(table.tickets.len(), 1);
         assert_eq!(table.tickets[0].get(Col::DueDate), "2026-10-09");
+        assert_eq!(table.tickets[0].get(Col::StartedAt), "2026-10-08");
 
         // ヘッダ行の指定がずれていればスキーマエラー
         cfg.sheets.header_row = 1;

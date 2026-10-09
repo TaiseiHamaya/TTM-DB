@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use anyhow::{Result, bail};
 
 use crate::config::{Col, Config};
-use crate::sheets::{Sheets, col_letter, quote_sheet, text};
+use crate::sheets::{Input, Sheets, col_letter, quote_sheet};
 
 #[derive(Debug, Clone)]
 pub struct Ticket {
@@ -100,10 +100,12 @@ impl Table {
                     .map(|(&c, &idx)| (c, r.get(idx).cloned().unwrap_or_default()))
                     .collect();
                 // 日付セルは表示形式に依らず YYYY-MM-DD に揃える。解釈できなければそのまま (/sync check で検出)
-                if let Some(due) = cells.get_mut(&Col::DueDate)
-                    && let Some(d) = crate::ops::normalize_date(due)
-                {
-                    *due = d;
+                for col in DATE_COLS {
+                    if let Some(v) = cells.get_mut(&col)
+                        && let Some(d) = crate::ops::normalize_date(v)
+                    {
+                        *v = d;
+                    }
                 }
                 Ticket { row: i + 1, cells }
             })
@@ -196,31 +198,49 @@ impl Store<'_> {
                 sheets_row = row,
                 "書式を設定済みの行を使い切ったため、行を挿入して追記します"
             );
+            // 日付以外を文字列のまま追記し、日付は追記した行へ別途書く
             let mut cells = vec![String::new(); table.headers.len()];
             for (col, v) in values {
-                if let Some(&i) = table.col_idx.get(col) {
-                    cells[i] = cell_input(*col, v);
+                if let Some(&i) = table.col_idx.get(col)
+                    && !is_date(*col)
+                {
+                    cells[i] = v.clone();
                 }
             }
-            return self
+            let row = self
                 .sheets
                 .append_row(&self.cfg.sheets.tickets_sheet, self.cfg.sheets.header_row, cells)
-                .await;
+                .await?;
+            let dates: Vec<_> = values.iter().filter(|(c, _)| is_date(*c)).cloned().collect();
+            self.write_cells(table, row, &dates).await?;
+            return Ok(row);
         }
         let values: Vec<_> = values.iter().filter(|(_, v)| !v.is_empty()).cloned().collect();
-        self.sheets.update_cells(self.cells(table, row, &values)).await?;
+        self.write_cells(table, row, &values).await?;
         Ok(row)
     }
 
-    /// (列, 値) を指定行の (A1範囲, 入力値) に変換する。シートに無い列は捨てる
-    fn cells(&self, table: &Table, row: usize, values: &[(Col, String)]) -> Vec<(String, String)> {
+    /// 指定行のセルを書く。文字列はそのまま (RAW)、日付は手入力と同様に解釈させて (USER_ENTERED) 書く。
+    /// 先頭に ' を付けた文字列はプルダウン等の入力規則に一致しないため、RAW と分けて送る
+    async fn write_cells(&self, table: &Table, row: usize, values: &[(Col, String)]) -> Result<()> {
+        let (dates, texts): (Vec<_>, Vec<_>) = values.iter().partition(|(c, _)| is_date(*c));
+        self.sheets
+            .update_cells(self.cells(table, row, &texts), Input::Raw)
+            .await?;
+        self.sheets
+            .update_cells(self.cells(table, row, &dates), Input::UserEntered)
+            .await
+    }
+
+    /// (列, 値) を指定行の (A1範囲, 値) に変換する。シートに無い列は捨てる
+    fn cells(&self, table: &Table, row: usize, values: &[&(Col, String)]) -> Vec<(String, String)> {
         values
             .iter()
             .filter_map(|(col, v)| {
                 let idx = table.col_idx.get(col)?;
                 Some((
                     format!("{}!{}{row}", self.sheet(), col_letter(*idx)),
-                    cell_input(*col, v),
+                    v.clone(),
                 ))
             })
             .collect()
@@ -247,17 +267,13 @@ impl Store<'_> {
                 "シートの {row} 行目が {expect_id} ではなくなっています (並べ替え等)。/sync で再読込してください"
             );
         }
-        self.sheets
-            .update_cells(self.cells(table, row, changes))
-            .await
+        self.write_cells(table, row, changes).await
     }
 }
 
-/// USER_ENTERED で書く値。期限は日付として解釈させ (日付の入力規則・表示形式を効かせる)、
-/// それ以外は文字列に固定する
-fn cell_input(col: Col, v: &str) -> String {
-    match col {
-        Col::DueDate => v.to_owned(),
-        _ => text(v),
-    }
+/// 日付として書く列 (日付の入力規則・表示形式を効かせる)
+const DATE_COLS: [Col; 3] = [Col::DueDate, Col::StartedAt, Col::CompletedAt];
+
+fn is_date(col: Col) -> bool {
+    DATE_COLS.contains(&col)
 }

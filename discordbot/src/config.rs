@@ -54,6 +54,7 @@ pub enum Col {
     Priority,
     DueDate,
     StartedAt,
+    CompletedAt,
     ParentId,
     ImageUrls,
     CreatedAt,
@@ -62,7 +63,7 @@ pub enum Col {
 }
 
 impl Col {
-    pub const ALL: [Col; 16] = [
+    pub const ALL: [Col; 17] = [
         Col::TicketId,
         Col::DiscordPostId,
         Col::Title,
@@ -74,6 +75,7 @@ impl Col {
         Col::Priority,
         Col::DueDate,
         Col::StartedAt,
+        Col::CompletedAt,
         Col::ParentId,
         Col::ImageUrls,
         Col::CreatedAt,
@@ -94,6 +96,7 @@ impl Col {
             Col::Priority => "priority",
             Col::DueDate => "due_date",
             Col::StartedAt => "started_at",
+            Col::CompletedAt => "completed_at",
             Col::ParentId => "parent_id",
             Col::ImageUrls => "image_urls",
             Col::CreatedAt => "created_at",

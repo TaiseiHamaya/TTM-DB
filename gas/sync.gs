@@ -2,23 +2,18 @@
  * TTM-DB: tickets / masters シートの内容を Discord Webhook へ送る。
  * Bot は Webhook のメッセージ (添付 sync.json) を受け取り、差分を Forum Post に反映する。
  *
- * 送り方:
- *   - 人がスプシを編集したとき (編集トリガー): 同期チャンネルの固定メッセージ1件の sync.json を
- *     差し替える。新しい投稿はしない。Bot はメッセージの更新イベントで反映する
- *   - Discord で /sync を実行したとき (Bot がウェブアプリを呼ぶ): sync.json を新しく投稿し、記録として残す
+ * 人がスプシを編集すると (編集トリガー)、同期チャンネルの固定メッセージ1件の sync.json を
+ * 差し替える。新しい投稿はしない。Bot はメッセージの更新イベントで反映する。
  * 変更トリガー (onChange) は Bot の Sheets API 書き込みでも動き、チケット発行のたびに送信されて
  * しまうので使わない。編集トリガー (onEdit) は API 書き込みでは動かない。
+ * Discord で /sync を実行したときの sync.json は Bot が自分で投稿するので、ここでは扱わない。
  *
  * セットアップ:
  *   1. 拡張機能 > Apps Script にこのファイルを貼る
- *   2. プロジェクトの設定 > スクリプト プロパティに次を追加する
- *        DISCORD_WEBHOOK_URL: 同期チャンネルの Webhook URL
- *        SYNC_SECRET: Bot と共有する合言葉 (Bot の環境変数 GAS_SYNC_SECRET と同じ値)
+ *   2. プロジェクトの設定 > スクリプト プロパティに DISCORD_WEBHOOK_URL (同期チャンネルの Webhook URL) を追加する
  *      固定メッセージの ID は初回送信時に SYNC_MESSAGE_ID として自動で保存される
  *   3. 下の TICKETS_SHEET / MASTERS_SHEET を Bot の config.toml と同じシート名にする
  *   4. setupTrigger を1回だけ実行して権限を承認する (編集トリガーが作られ、旧版の変更トリガーは消える)
- *   5. デプロイ > 新しいデプロイ > ウェブアプリ (実行ユーザー: 自分、アクセス: 全員) で公開し、
- *      ウェブアプリの URL を Bot の環境変数 GAS_SYNC_URL に設定する
  */
 
 const TICKETS_SHEET = 'tickets';
@@ -50,38 +45,11 @@ function onSheetEdit(e) {
   // 対象外のシートの編集は送らない
   const name = e && e.range ? e.range.getSheet().getName() : '';
   if (name !== TICKETS_SHEET && name !== MASTERS_SHEET) return;
-  pushToDiscord(false);
+  pushToDiscord();
 }
 
-/** ウェブアプリの入口。Bot が /sync 実行時に { "secret": "..." } を POST してくる */
-function doPost(e) {
-  const secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
-  let body = {};
-  try {
-    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-  } catch (_) {
-    // 不正な本文は合言葉不一致として扱う
-  }
-  if (!secret || body.secret !== secret) return reply({ ok: false, error: '合言葉が一致しません' });
-  try {
-    pushToDiscord(true);
-    return reply({ ok: true });
-  } catch (err) {
-    return reply({ ok: false, error: String(err && err.message ? err.message : err) });
-  }
-}
-
-function reply(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
-    ContentService.MimeType.JSON,
-  );
-}
-
-/**
- * tickets / masters の表示値を読んで Webhook に送る。
- * asNewPost = true (/sync) なら新しく投稿し、false (編集) なら固定メッセージを差し替える
- */
-function pushToDiscord(asNewPost) {
+/** tickets / masters の表示値を読み、Webhook で固定メッセージの sync.json を差し替える */
+function pushToDiscord() {
   const props = PropertiesService.getScriptProperties();
   const url = props.getProperty('DISCORD_WEBHOOK_URL');
   if (!url) throw new Error('スクリプト プロパティ DISCORD_WEBHOOK_URL が未設定です');
@@ -98,18 +66,6 @@ function pushToDiscord(asNewPost) {
     };
     const rows = snapshot.tickets ? Math.max(snapshot.tickets.length - 1, 0) : 0;
     const file = Utilities.newBlob(JSON.stringify(snapshot), 'application/json', 'sync.json');
-
-    if (asNewPost) {
-      send('post', url + '?wait=true', {
-        payload_json: JSON.stringify({
-          content: `TTM-DB sync: tickets ${rows}行`,
-          allowed_mentions: { parse: [] },
-        }),
-        'files[0]': file,
-      });
-      return;
-    }
-
     const content = `TTM-DB 自動同期 (スプシ編集時にこのメッセージが更新されます): tickets ${rows}行`;
     const id = props.getProperty(MESSAGE_ID_KEY);
     if (id) {

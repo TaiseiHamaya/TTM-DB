@@ -65,6 +65,9 @@ max_forum_tags = 20
 # Webhook URL https://discord.com/api/webhooks/<ID>/<トークン> の <ID> 部分。
 # 未設定だとスプシ側の編集は Discord に反映されない (/sync で手動反映のみ)
 # sync_webhook_id = 123456789012345678
+# 同期用のテキストチャンネル (sync_webhook_id の Webhook があるチャンネル)。
+# /sync ticket・/sync all の実行時に Bot が sync.json を記録として投稿する。未設定なら投稿しない
+# sync_channel_id = 123456789012345678
 
 # Discord ユーザーとスプシ上の表示名の対応。
 # キーは Discord ユーザーID (推奨) またはユーザー名 (@ の後ろのハンドル)、値はスプシに書く名前。

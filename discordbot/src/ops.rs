@@ -13,6 +13,7 @@ use crate::app::App;
 use crate::config::Col;
 use crate::masters::{Masters, StatusRole, can_transition};
 use crate::render::{self, mention_only};
+use crate::sheets::quote_sheet;
 use crate::store::{SchemaError, Table, Ticket};
 
 const FAIL_REACTION: RequestReactionType<'static> = RequestReactionType::Unicode { name: "⚠" };
@@ -617,35 +618,35 @@ pub async fn apply_snapshot(app: &App, snap: Snapshot) -> Result<Option<usize>> 
     sync_table(app, &table, false, Some(snap.read_at)).await.map(Some)
 }
 
-/// /sync 実行時にスプシの GAS ウェブアプリを呼び、同期チャンネルへ sync.json を送らせる。
-/// GAS_SYNC_URL が未設定なら何もせず false を返す
-pub async fn request_gas_push(app: &App) -> Result<bool> {
-    let Some(url) = app.env.gas_sync_url.as_deref() else {
-        return Ok(false);
+/// /sync 実行時の記録として、Sheets の tickets / masters を GAS と同じ形式の sync.json にして
+/// 同期チャンネルへ Bot が投稿する。Bot の投稿は同期データとしては処理されない。
+/// discord.sync_channel_id が未設定なら何もしない
+pub async fn post_snapshot(app: &App) -> Result<()> {
+    let Some(channel) = app.cfg.discord.sync_channel_id else {
+        return Ok(());
     };
-    let secret = app.env.gas_sync_secret.as_deref().unwrap_or_default();
-    #[derive(serde::Deserialize)]
-    struct Reply {
-        ok: bool,
-        #[serde(default)]
-        error: Option<String>,
-    }
-    // ウェブアプリは結果を別 URL へのリダイレクトで返す (reqwest が GET で追従する)
-    let res: Reply = app
-        .web
-        .post(url)
-        .json(&serde_json::json!({ "secret": secret }))
-        .send()
+    let tickets = app
+        .sheets
+        .get(&quote_sheet(&app.cfg.sheets.tickets_sheet))
+        .await?;
+    let masters = app
+        .sheets
+        .get(&format!("{}!A:C", quote_sheet(&app.cfg.sheets.masters_sheet)))
+        .await?;
+    let rows = tickets.len().saturating_sub(1);
+    let snapshot = serde_json::json!({
+        "read_at": chrono::Utc::now().timestamp_millis(),
+        "tickets": tickets,
+        "masters": masters,
+    });
+    let file = Attachment::from_bytes("sync.json".to_owned(), serde_json::to_vec(&snapshot)?, 0);
+    app.http
+        .create_message(Id::new(channel))
+        .content(&format!("TTM-DB sync: tickets {rows}行"))
+        .attachments(&[file])
         .await
-        .context("GAS ウェブアプリを呼べません")?
-        .error_for_status()?
-        .json()
-        .await
-        .context("GAS ウェブアプリの応答が不正です (デプロイ設定を確認してください)")?;
-    if !res.ok {
-        bail!("GAS: {}", res.error.unwrap_or_default());
-    }
-    Ok(true)
+        .context("同期チャンネルへの投稿に失敗しました")?;
+    Ok(())
 }
 
 /// Sheets 全行を読み直して Discord に反映する (/sync all など手動用)

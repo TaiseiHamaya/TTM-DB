@@ -152,7 +152,7 @@ Discord の Modal は部品5つまでで、Modal の送信に続けて別の Mod
 - 通常は Discord 操作時に即 Sheets 更新し、Sheets 編集時はスプシの GAS から Discord へ送って反映する。Bot から Sheets への定期取得 (ポーリング) は行わない
 - GAS はインストール型の編集トリガー (onEdit) で tickets と masters の表示値を読み、JSON 添付として Discord Webhook で送る。Bot は設定した Webhook ID の投稿だけを受け付け、内容ハッシュで差分検出し、Forum タイトルとタグと先頭 Embed を更新する
 - 変更トリガー (onChange) は Bot の API 書き込みでも動き、チケット発行のたびに送信されるため使わない。編集トリガーは API 書き込みでは動かないため、送信はループしない。GAS が読んだ時刻より後に Bot が反映したチケットと、順序が入れ替わって届いた古い送信内容は適用しない
-- 編集トリガーでは新しい投稿をせず、同期チャンネルの固定メッセージ1件の sync.json を Webhook のメッセージ編集で差し替える。Bot は MESSAGE_UPDATE で受けて反映する。固定メッセージの ID は GAS のスクリプト プロパティに保存し、消えていたら作り直す。/sync ticket と /sync all の実行時は Bot が GAS ウェブアプリ (合言葉付き POST) を呼んで sync.json を新しく投稿させ、その投稿は記録として残す
+- 編集トリガーでは新しい投稿をせず、同期チャンネルの固定メッセージ1件の sync.json を Webhook のメッセージ編集で差し替える。Bot は MESSAGE_UPDATE で受けて反映する。固定メッセージの ID は GAS のスクリプト プロパティに保存し、消えていたら作り直す。/sync ticket と /sync all の実行時は Bot が Sheets を読んで GAS と同じ形式の sync.json を同期チャンネル (discord.sync_channel_id) に投稿し、記録として残す。Bot 自身の投稿は同期データとして処理しない
 - 手動として /sync を用意する。ticket_id 指定で即時同期し、check 付きでマスタ不整合と必須欠落を検査する
 - 競合解決は updated_at が新しい方を勝ちとする Last-Write-Wins とする。Discord 編集中に Sheets が先に更新されていたら Discord 側操作を拒否して再読込誘導する
 - 同時発番対策として ticket_id 発番は Sheets 再読込とユニーク確認後に確定する。重複時はサフィックス付与して警告投稿する

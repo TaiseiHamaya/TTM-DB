@@ -83,13 +83,13 @@ impl Form<'_> {
     fn response(&self, custom_id: String, m: &Masters) -> InteractionResponse {
         let components = vec![
             label(
-                "タイトル",
+                "タスク",
                 None,
                 text_input(
                     "title",
                     TextInputStyle::Short,
                     self.title,
-                    "ログインできない",
+                    "",
                     true,
                     80,
                 ),
@@ -101,7 +101,7 @@ impl Form<'_> {
                     "body",
                     TextInputStyle::Paragraph,
                     self.body,
-                    "再現手順・期待する結果など",
+                    "",
                     true,
                     4000,
                 ),

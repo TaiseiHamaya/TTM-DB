@@ -130,6 +130,7 @@ journalctl -u ttm-db -f
 | コマンド | 説明 |
 |---|---|
 | `/ticket create` | フォームでタイトル・詳細・種類・担当者・優先度を入力し、続けて表示される確認メッセージで発行 (期限・親チケットはそこで変更可)。チケットの Post 内で実行すると親が自動設定される。画像は発行後に Post へ投稿する |
+| 右クリックメニュー「チケットを発行」 | メッセージを右クリック →「アプリ」から `/ticket create` と同じフォームを開く |
 | `/ticket status id status` | 進行度を変更 (ボタンの代替) |
 | `/list [status] [category] [assignee] [priority]` | 一覧 (最大20件) |
 | `/search query` | タイトル・詳細・ID の部分一致検索 |

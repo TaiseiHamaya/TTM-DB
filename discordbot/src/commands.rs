@@ -1,4 +1,5 @@
 //! Slash Commands: /ticket create, /ticket status, /list, /search, /sync
+//! と、メッセージの右クリックメニュー「チケットを発行」
 
 use anyhow::Result;
 use twilight_model::application::command::{
@@ -25,7 +26,11 @@ use crate::{create, ops, render::truncate};
 
 /// サーバーに登録するコマンド
 pub fn definitions() -> Vec<Command> {
-    let ticket_id = || StringBuilder::new("id", "チケットID").required(true).autocomplete(true);
+    let ticket_id = || {
+        StringBuilder::new("id", "チケットID")
+            .required(true)
+            .autocomplete(true)
+    };
     vec![
         CommandBuilder::new("ticket", "チケット", CommandType::ChatInput)
             .option(SubCommandBuilder::new(
@@ -81,6 +86,8 @@ pub fn definitions() -> Vec<Command> {
                 "サーバー参加者を担当者マスタに取り込む (管理者)",
             ))
             .build(),
+        // 右クリックメニューのコマンドは説明文を持たない
+        CommandBuilder::new(create::MESSAGE_COMMAND, "", CommandType::Message).build(),
     ]
 }
 
@@ -96,17 +103,21 @@ fn split(data: &CommandData) -> (Option<&str>, &[CommandDataOption]) {
 }
 
 fn str_opt(opts: &[CommandDataOption], name: &str) -> Option<String> {
-    opts.iter().find(|o| o.name == name).and_then(|o| match &o.value {
-        CommandOptionValue::String(s) | CommandOptionValue::Focused(s, _) => Some(s.clone()),
-        _ => None,
-    })
+    opts.iter()
+        .find(|o| o.name == name)
+        .and_then(|o| match &o.value {
+            CommandOptionValue::String(s) | CommandOptionValue::Focused(s, _) => Some(s.clone()),
+            _ => None,
+        })
 }
 
 fn user_opt(opts: &[CommandDataOption], name: &str) -> Option<Id<UserMarker>> {
-    opts.iter().find(|o| o.name == name).and_then(|o| match o.value {
-        CommandOptionValue::User(id) => Some(id),
-        _ => None,
-    })
+    opts.iter()
+        .find(|o| o.name == name)
+        .and_then(|o| match o.value {
+            CommandOptionValue::User(id) => Some(id),
+            _ => None,
+        })
 }
 
 // ---------- オートコンプリート ----------
@@ -138,7 +149,9 @@ pub async fn on_autocomplete(app: &App, i: &Interaction, data: &CommandData) -> 
     };
     let res = interact::response(
         InteractionResponseType::ApplicationCommandAutocompleteResult,
-        InteractionResponseDataBuilder::new().choices(choices).build(),
+        InteractionResponseDataBuilder::new()
+            .choices(choices)
+            .build(),
     );
     respond(app, i, &res).await
 }
@@ -185,7 +198,12 @@ async fn ticket_choices(app: &App, i: &Interaction, partial: &str) -> Vec<Comman
                 || t.get(Col::Title).to_lowercase().contains(&partial)
         })
         .take(25)
-        .map(|t| choice(format!("{} {}", t.id(), t.get(Col::Title)), t.id().to_owned()))
+        .map(|t| {
+            choice(
+                format!("{} {}", t.id(), t.get(Col::Title)),
+                t.id().to_owned(),
+            )
+        })
         .collect()
 }
 
@@ -194,7 +212,9 @@ async fn ticket_choices(app: &App, i: &Interaction, partial: &str) -> Vec<Comman
 pub async fn on_command(app: &App, i: &Interaction, data: &CommandData) -> Result<()> {
     let (sub, opts) = split(data);
     match (data.name.as_str(), sub) {
-        ("ticket", Some("create")) => create::open_form(app, i).await,
+        ("ticket", Some("create")) | (create::MESSAGE_COMMAND, _) => {
+            create::open_form(app, i).await
+        }
         ("ticket", Some("status")) => status(app, i, opts).await,
         ("list", _) => list(app, i, data, opts).await,
         ("search", _) => search(app, i, opts).await,
@@ -241,7 +261,12 @@ fn line(t: &Ticket) -> String {
     )
 }
 
-async fn send_list(app: &App, i: &Interaction, heading: String, mut items: Vec<Ticket>) -> Result<()> {
+async fn send_list(
+    app: &App,
+    i: &Interaction,
+    heading: String,
+    mut items: Vec<Ticket>,
+) -> Result<()> {
     let limit = app.cfg.ticket.list_limit;
     {
         let m = app.masters.read().await;
@@ -283,7 +308,12 @@ async fn send_list(app: &App, i: &Interaction, heading: String, mut items: Vec<T
 }
 
 /// /list: チケット一覧
-async fn list(app: &App, i: &Interaction, data: &CommandData, opts: &[CommandDataOption]) -> Result<()> {
+async fn list(
+    app: &App,
+    i: &Interaction,
+    data: &CommandData,
+    opts: &[CommandDataOption],
+) -> Result<()> {
     respond(app, i, &defer_ephemeral()).await?;
     let table = app.load_table().await?;
     let status = str_opt(opts, "status");
@@ -313,9 +343,7 @@ async fn list(app: &App, i: &Interaction, data: &CommandData, opts: &[CommandDat
         .filter(|t| eq(&status, t.get(Col::Status)))
         .filter(|t| eq(&category, t.get(Col::Category)))
         .filter(|t| eq(&priority, t.get(Col::Priority)))
-        .filter(|t| {
-            assignee.is_none() || assignee_name.as_deref() == Some(t.get(Col::Assignee))
-        })
+        .filter(|t| assignee.is_none() || assignee_name.as_deref() == Some(t.get(Col::Assignee)))
         .cloned()
         .collect();
     let mut conds: Vec<String> = [status, category, priority].into_iter().flatten().collect();
@@ -354,7 +382,12 @@ async fn sync(app: &App, i: &Interaction, sub: &str, opts: &[CommandDataOption])
     if matches!(sub, "all" | "tags" | "members")
         && !is_admin(i.member.as_ref().and_then(|m| m.permissions))
     {
-        return respond(app, i, &interact::ephemeral("このコマンドは管理者のみ実行できます")).await;
+        return respond(
+            app,
+            i,
+            &interact::ephemeral("このコマンドは管理者のみ実行できます"),
+        )
+        .await;
     }
     respond(app, i, &defer_ephemeral()).await?;
     match sub {

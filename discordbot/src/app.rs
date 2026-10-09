@@ -144,7 +144,9 @@ impl App {
 /// インタラクションに付随するメンバー権限から管理者相当かを判定する
 pub fn is_admin(perms: Option<Permissions>) -> bool {
     perms.is_some_and(|p| {
-        p.intersects(Permissions::ADMINISTRATOR | Permissions::MANAGE_THREADS | Permissions::MANAGE_GUILD)
+        p.intersects(
+            Permissions::ADMINISTRATOR | Permissions::MANAGE_THREADS | Permissions::MANAGE_GUILD,
+        )
     })
 }
 

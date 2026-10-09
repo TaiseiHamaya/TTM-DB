@@ -1,4 +1,4 @@
-//! /ticket create の発行フロー。
+//! /ticket create (とメッセージの右クリックメニュー「チケットを発行」) の発行フロー。
 //!
 //! Discord のフォームは部品5つまでで、フォームの送信に続けて別のフォームを開くこともできない。
 //! そのため次の2段構成にしている。
@@ -57,6 +57,9 @@ pub struct Draft {
     created: Instant,
 }
 
+/// メッセージの右クリックメニューに出すコマンド名。/ticket create と同じく空のフォームを開く
+pub const MESSAGE_COMMAND: &str = "チケットを発行";
+
 /// /ticket create: フォームを開く
 pub async fn open_form(app: &App, i: &Interaction) -> Result<()> {
     let m = app.masters.read().await.clone();
@@ -85,26 +88,12 @@ impl Form<'_> {
             label(
                 "タスク",
                 None,
-                text_input(
-                    "title",
-                    TextInputStyle::Short,
-                    self.title,
-                    "",
-                    true,
-                    80,
-                ),
+                text_input("title", TextInputStyle::Short, self.title, "", true, 80),
             ),
             label(
                 "詳細",
                 None,
-                text_input(
-                    "body",
-                    TextInputStyle::Paragraph,
-                    self.body,
-                    "",
-                    true,
-                    4000,
-                ),
+                text_input("body", TextInputStyle::Paragraph, self.body, "", true, 4000),
             ),
             label(
                 "種類",

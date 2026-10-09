@@ -224,6 +224,60 @@ pub fn components(t: &Ticket, table: &Table, m: &Masters) -> Vec<Component> {
     rows
 }
 
+/// スプシで変更を通知する列 (スプシ側で編集される列のみ。タイトル等は保護されている)
+const NOTIFY_COLS: [Col; 8] = [
+    Col::Status,
+    Col::Category,
+    Col::Priority,
+    Col::Assignee,
+    Col::StartedAt,
+    Col::DueDate,
+    Col::CompletedAt,
+    Col::Body,
+];
+
+/// スプシで変わった列 (前回 Discord へ反映した値 → 現在の値)
+pub fn changed_cols(prev: &HashMap<String, String>, t: &Ticket) -> Vec<Col> {
+    NOTIFY_COLS
+        .into_iter()
+        .filter(|&c| prev.get(c.key()).map_or("", String::as_str) != t.get(c))
+        .collect()
+}
+
+/// スプシでの変更内容を Post に投稿する本文。変更が無ければ None
+pub fn changes_content(
+    prev: &HashMap<String, String>,
+    t: &Ticket,
+    m: &Masters,
+    cfg: &Config,
+) -> Option<String> {
+    let cols = changed_cols(prev, t);
+    if cols.is_empty() {
+        return None;
+    }
+    let show = |col: Col, v: &str| -> String {
+        match col {
+            Col::Body => or_dash(&truncate(&v.split_whitespace().collect::<Vec<_>>().join(" "), 200)),
+            _ => or_dash(&truncate(v, 100)),
+        }
+    };
+    let mut lines = vec!["📝 スプシで更新されました".to_owned()];
+    for col in &cols {
+        let old = prev.get(col.key()).map_or("", String::as_str);
+        lines.push(format!(
+            "- **{}**: {} → {}",
+            cfg.header(*col),
+            show(*col, old),
+            show(*col, t.get(*col))
+        ));
+    }
+    // 担当者か進行度が変わったときは担当者に知らせる
+    if cols.iter().any(|c| matches!(c, Col::Assignee | Col::Status)) {
+        lines.push(format!("担当: {}", assignee_label(t, m, cfg)));
+    }
+    Some(truncate(&lines.join("\n"), 2000))
+}
+
 /// 先頭メッセージ本文 (担当者メンション)
 pub fn starter_content(t: &Ticket, m: &Masters, cfg: &Config) -> String {
     format!("担当: {}", assignee_label(t, m, cfg))
@@ -355,5 +409,35 @@ mod tests {
         assert_eq!(title.chars().count(), 100);
         assert!(title.ends_with("… [T-0001]"));
         assert_eq!(ticket_id_from_title(&title), Some("T-0001"));
+    }
+
+    #[test]
+    fn changes_from_sheets() {
+        let cfg = Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml")).unwrap();
+        let cols = cfg.required_cols();
+        let row = |title: &str, category: &str, updated: &str| -> Vec<String> {
+            cols.iter()
+                .map(|c| match c {
+                    Col::TicketId => "T-0001".to_owned(),
+                    Col::Title => title.to_owned(),
+                    Col::Category => category.to_owned(),
+                    Col::UpdatedAt => updated.to_owned(),
+                    _ => String::new(),
+                })
+                .collect()
+        };
+        let rows = vec![
+            cols.iter().map(|c| cfg.header(*c).to_owned()).collect::<Vec<_>>(),
+            row("タイトル", "旧", "a"),
+            row("別タイトル", "新", "b"),
+        ];
+        let table = Table::from_rows(&rows, &cfg).unwrap();
+        let prev = table.tickets[0].values();
+        // タイトルと updated_at の変化は通知しない
+        assert_eq!(changed_cols(&prev, &table.tickets[1]), vec![Col::Category]);
+        assert!(changed_cols(&prev, &table.tickets[0]).is_empty());
+        let m = Masters::default();
+        let text = changes_content(&prev, &table.tickets[1], &m, &cfg).unwrap();
+        assert!(text.contains("旧 → 新"));
     }
 }

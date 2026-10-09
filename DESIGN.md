@@ -151,6 +151,7 @@ Discord の Modal は部品5つまでで、Modal の送信に続けて別の Mod
 
 - 通常は Discord 操作時に即 Sheets 更新し、Sheets 編集時はスプシの GAS が送る合図を受けて即時反映する。Bot から Sheets への定期取得 (ポーリング) は行わない
 - GAS はインストール型の編集トリガー (onEdit) で、tickets か masters が編集されたら Cloud Pub/Sub のトピックへ合図を送る。合図にシートの内容は載せない。Bot はサブスクリプションをロングポーリング (REST の pull) で受信して ack し、1.5秒待って続けて届いた合図をまとめてから、Sheets の masters と tickets を読み直す。内容ハッシュで差分検出し、Forum タイトルとタグと先頭 Embed を更新する
+- スプシで変わった列は、前回 Discord へ反映した値と比べて「旧 → 新」の形でそのチケットの Post に投稿する。対象はスプシ側で編集される列 (進行度、種類、優先度、担当者、着手日、期限、完了日、詳細) のみとし、保護しているタイトルなどは対象外とする。担当者か進行度が変わったときだけ担当者にメンションする。前回の値は同期状態ファイルに保存し、記録が無いチケット (新規 Post、導入直後) は投稿しない
 - 合図は少なくとも1回の配信で、重複や順序の入れ替わりがあり得る。合図を受けるたびに最新の Sheets を読んで差分だけ反映するため、どちらも結果に影響しない。Bot の停止中に届いた合図はサブスクリプションに残り、起動後に反映される
 - Pub/Sub を使う理由は、Apps Script の送信元 IP が多数の利用者で共有されており、Discord Webhook へ送ると Discord 手前の Cloudflare に IP 単位でレート制限 (error code: 1015) されることがあるためである。Pub/Sub なら GAS と Bot のどちらも Google に接続しに行くだけで、Bot を外部に公開する受け口も要らない
 - GAS はユーザーの OAuth トークン (ScriptApp.getOAuthToken) で送り、x-goog-user-project で API 利用をトピックのプロジェクトに付ける。Bot は Sheets と同じ Service Account で pubsub スコープのトークンを取って受信する

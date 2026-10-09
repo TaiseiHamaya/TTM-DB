@@ -19,7 +19,7 @@ use crate::config::{Config, Env};
 use crate::create::Draft;
 use crate::masters::Masters;
 use crate::sheets::Sheets;
-use crate::store::{Store, Table};
+use crate::store::{Store, Table, Ticket};
 
 pub type Data = Arc<App>;
 
@@ -153,10 +153,13 @@ pub fn display_name<'a>(nick: Option<&'a str>, user: &'a twilight_model::user::U
     nick.or(user.global_name.as_deref()).unwrap_or(&user.name)
 }
 
-/// 差分検出用に、最後に Discord へ反映した内容ハッシュを保存する
+/// 差分検出用に、最後に Discord へ反映した内容ハッシュと値を保存する
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SyncState {
     pub hashes: HashMap<String, u64>,
+    /// 最後に Discord へ反映した各列の値 (スプシで変わった内容を Post に投稿するため)
+    #[serde(default)]
+    pub values: HashMap<String, HashMap<String, String>>,
     /// 同期失敗リアクションを付けた ticket_id
     pub failed: HashSet<String>,
     /// 状態ファイルが新規作成された (初回の同期では全件反映せず現状を記録するだけ)
@@ -186,6 +189,12 @@ impl SyncState {
         };
         s.path = path.to_owned();
         s
+    }
+
+    /// Discord へ反映した内容として記録する
+    pub fn record(&mut self, t: &Ticket) {
+        self.hashes.insert(t.id().to_owned(), t.content_hash());
+        self.values.insert(t.id().to_owned(), t.values());
     }
 
     /// 一時ファイルに書いてから置き換える。書き込み中の電源断でも元のファイルが残る

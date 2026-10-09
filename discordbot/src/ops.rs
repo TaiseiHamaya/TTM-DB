@@ -256,7 +256,7 @@ async fn create_post(app: &App, table: &Table, t: &Ticket, m: &Masters) -> Resul
     t.set(Col::DiscordPostId, post_id.to_string());
     t.set(Col::DiscordUrl, url.clone());
     let mut st = app.sync_state.lock().await;
-    st.hashes.insert(t.id().to_owned(), t.content_hash());
+    st.record(&t);
     st.save();
     Ok((post_id.get(), url))
 }
@@ -272,7 +272,7 @@ pub async fn push_ticket(app: &App, table: &Table, t: &Ticket) -> Result<()> {
     let mut st = app.sync_state.lock().await;
     match &result {
         Ok(()) => {
-            st.hashes.insert(t.id().to_owned(), t.content_hash());
+            st.record(t);
             if st.failed.remove(t.id())
                 && let Some(post_id) = t.post_id()
             {
@@ -606,20 +606,20 @@ async fn sync_table(app: &App, table: &Table, force: bool) -> Result<usize> {
             continue;
         }
         let hash = t.content_hash();
-        let last = app.sync_state.lock().await.hashes.get(t.id()).copied();
+        let (last, has_values) = {
+            let st = app.sync_state.lock().await;
+            (st.hashes.get(t.id()).copied(), st.values.contains_key(t.id()))
+        };
         let need =
             force || t.post_id().is_none() || (last != Some(hash) && !(fresh && last.is_none()));
         if !need {
-            if last.is_none() {
-                app.sync_state
-                    .lock()
-                    .await
-                    .hashes
-                    .insert(t.id().to_owned(), hash);
+            // 値を記録する前の状態ファイルからの移行も兼ねる
+            if last.is_none() || !has_values {
+                app.sync_state.lock().await.record(t);
             }
             continue;
         }
-        if push_ticket(app, table, t).await.is_ok() {
+        if push_from_sheets(app, table, t).await.is_ok() {
             pushed += 1;
         }
     }
@@ -639,7 +639,43 @@ pub async fn sync_one(app: &App, ticket_id: &str) -> Result<()> {
     let t = table
         .find(ticket_id)
         .with_context(|| format!("チケット {ticket_id} が見つかりません"))?;
-    push_ticket(app, &table, t).await
+    push_from_sheets(app, &table, t).await
+}
+
+/// スプシの内容を Discord に反映し、前回反映時から変わった列を Post に投稿する
+async fn push_from_sheets(app: &App, table: &Table, t: &Ticket) -> Result<()> {
+    let prev = app.sync_state.lock().await.values.get(t.id()).cloned();
+    push_ticket(app, table, t).await?;
+    // 前回の値が無い (新規 Post・記録前) ときは差分が分からないため投稿しない
+    let (Some(prev), Some(post_id)) = (prev, t.post_id()) else {
+        return Ok(());
+    };
+    let m = app.masters.read().await.clone();
+    let Some(text) = render::changes_content(&prev, t, &m, &app.cfg) else {
+        return Ok(());
+    };
+    let notify_assignee = render::changed_cols(&prev, t)
+        .iter()
+        .any(|c| matches!(c, Col::Assignee | Col::Status));
+    let mention = mention_only(
+        render::assignee_user(t, &m, &app.cfg).filter(|_| notify_assignee),
+    );
+    tracing::info!(
+        ticket_id = %t.id(),
+        discord_post_id = post_id,
+        sheets_row = t.row,
+        "スプシでの変更を Post に投稿"
+    );
+    if let Err(e) = app
+        .http
+        .create_message(Id::new(post_id))
+        .content(&text)
+        .allowed_mentions(Some(&mention))
+        .await
+    {
+        tracing::warn!(ticket_id = %t.id(), error = %e, "変更内容の投稿に失敗");
+    }
+    Ok(())
 }
 
 /// /sync check: マスタ不整合と必須欠落を検査する

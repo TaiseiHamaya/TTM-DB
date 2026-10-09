@@ -40,6 +40,15 @@ impl Ticket {
             .collect()
     }
 
+    /// 各列の値 (列キー → 値)。空の列は含めない
+    pub fn values(&self) -> HashMap<String, String> {
+        Col::ALL
+            .into_iter()
+            .filter(|&c| !self.get(c).is_empty())
+            .map(|c| (c.key().to_owned(), self.get(c).to_owned()))
+            .collect()
+    }
+
     /// Discord 表示に関わる内容のハッシュ (スプシからの同期の差分検出用, FNV-1a)
     pub fn content_hash(&self) -> u64 {
         let mut h: u64 = 0xcbf29ce484222325;

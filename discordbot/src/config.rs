@@ -53,6 +53,7 @@ pub enum Col {
     Reporter,
     Priority,
     DueDate,
+    StartedAt,
     ParentId,
     ImageUrls,
     CreatedAt,
@@ -61,7 +62,7 @@ pub enum Col {
 }
 
 impl Col {
-    pub const ALL: [Col; 15] = [
+    pub const ALL: [Col; 16] = [
         Col::TicketId,
         Col::DiscordPostId,
         Col::Title,
@@ -72,6 +73,7 @@ impl Col {
         Col::Reporter,
         Col::Priority,
         Col::DueDate,
+        Col::StartedAt,
         Col::ParentId,
         Col::ImageUrls,
         Col::CreatedAt,
@@ -91,6 +93,7 @@ impl Col {
             Col::Reporter => "reporter",
             Col::Priority => "priority",
             Col::DueDate => "due_date",
+            Col::StartedAt => "started_at",
             Col::ParentId => "parent_id",
             Col::ImageUrls => "image_urls",
             Col::CreatedAt => "created_at",
@@ -286,6 +289,14 @@ impl Config {
     pub fn tz(&self) -> chrono::FixedOffset {
         chrono::FixedOffset::east_opt(self.ticket.utc_offset_hours * 3600)
             .unwrap_or_else(|| chrono::FixedOffset::east_opt(0).unwrap())
+    }
+
+    /// 今日の日付 (YYYY-MM-DD)
+    pub fn today(&self) -> String {
+        chrono::Utc::now()
+            .with_timezone(&self.tz())
+            .format("%Y-%m-%d")
+            .to_string()
     }
 
     pub fn now(&self) -> String {

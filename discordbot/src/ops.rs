@@ -429,20 +429,16 @@ pub async fn change_status(
     }
 
     let now = app.cfg.now();
-    app.store()
-        .update(
-            &table,
-            t.row,
-            t.id(),
-            &[
-                (Col::Status, to_name.clone()),
-                (Col::UpdatedAt, now.clone()),
-            ],
-        )
-        .await?;
+    let mut changes = vec![(Col::Status, to_name.clone()), (Col::UpdatedAt, now)];
+    // 着手日は最初に着手中にした日を残す (差戻しでは上書きしない)
+    if target == StatusRole::InProgress && t.get(Col::StartedAt).is_empty() {
+        changes.push((Col::StartedAt, app.cfg.today()));
+    }
+    app.store().update(&table, t.row, t.id(), &changes).await?;
     let mut updated = t.clone();
-    updated.set(Col::Status, to_name.clone());
-    updated.set(Col::UpdatedAt, now);
+    for (col, v) in changes {
+        updated.set(col, v);
+    }
     tracing::info!(
         ticket_id = %t.id(),
         discord_post_id = t.post_id().unwrap_or(0),

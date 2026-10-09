@@ -68,6 +68,7 @@ Forum チャンネル #tickets 1つを置き場とする。
 | reporter | 必須 | 発行者表示名 | サーバー表示名 |
 | priority | 必須 | 優先度4値のいずれか | 高 |
 | due_date | 必須 | 期限 | 2026-10-10 |
+| started_at | 任意 | 着手日 | 2026-10-09 |
 | parent_id | 任意 | 親チケット ID | T-0000 |
 | image_urls | 任意 | CDN URL のカンマ区切り | https://example.com/a.png |
 | created_at | 必須 | 作成日時 | ISO8601形式 |

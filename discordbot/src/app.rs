@@ -1,6 +1,7 @@
 //! Bot 全体で共有する状態。
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -173,29 +174,46 @@ pub struct SyncState {
 }
 
 impl SyncState {
+    /// ファイルが無ければ初回扱い (fresh)。読めない・壊れている場合は記録を捨て、
+    /// 次の GAS 送信で全件を反映し直す (初回扱いにすると変更が反映されないまま記録だけ進むため)
     fn load(path: &str) -> Self {
-        let mut s = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|t| serde_json::from_str::<SyncState>(&t).ok())
-            .unwrap_or_else(|| SyncState {
+        let mut s = match std::fs::read_to_string(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => SyncState {
                 fresh: true,
                 ..Default::default()
-            });
+            },
+            Err(e) => {
+                tracing::error!(error = %e, path, "同期状態を読めないため、次の同期で全件を反映し直す");
+                SyncState::default()
+            }
+            Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
+                tracing::error!(error = %e, path, "同期状態が壊れているため、次の同期で全件を反映し直す");
+                SyncState::default()
+            }),
+        };
         s.path = path.to_owned();
         s
     }
 
+    /// 一時ファイルに書いてから置き換える。書き込み中の電源断でも元のファイルが残る
     pub fn save(&self) {
-        if let Some(dir) = Path::new(&self.path).parent() {
+        let path = Path::new(&self.path);
+        if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        match serde_json::to_string(self) {
-            Ok(text) => {
-                if let Err(e) = std::fs::write(&self.path, text) {
-                    tracing::warn!(error = %e, path = %self.path, "同期状態の保存に失敗");
-                }
-            }
-            Err(e) => tracing::warn!(error = %e, "同期状態のシリアライズに失敗"),
+        let text = match serde_json::to_string(self) {
+            Ok(text) => text,
+            Err(e) => return tracing::warn!(error = %e, "同期状態のシリアライズに失敗"),
+        };
+        let tmp = path.with_extension("json.tmp");
+        let result = (|| {
+            let mut f = std::fs::File::create(&tmp)?;
+            f.write_all(text.as_bytes())?;
+            f.sync_all()?;
+            std::fs::rename(&tmp, path)
+        })();
+        if let Err(e) = result {
+            tracing::warn!(error = %e, path = %self.path, "同期状態の保存に失敗");
         }
     }
 }

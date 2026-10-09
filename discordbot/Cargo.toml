@@ -5,11 +5,11 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
-chrono = "0.4.45"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-tokio = { version = "1.53", features = ["full"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync"] }
 toml = "1.1.6"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
@@ -17,4 +17,5 @@ twilight-gateway = { version = "0.17", default-features = false, features = ["ru
 twilight-http = "0.17"
 twilight-model = "0.17"
 twilight-util = { version = "0.17", features = ["builder"] }
-yup-oauth2 = "12.1.2"
+# 暗号実装は reqwest の rustls 機能と同じ aws-lc-rs に揃える (既定の ring を残すと両方がビルドされる)
+yup-oauth2 = { version = "12.1.2", default-features = false, features = ["hyper-rustls", "service-account", "aws-lc-rs"] }

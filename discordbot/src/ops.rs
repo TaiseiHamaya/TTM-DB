@@ -841,6 +841,17 @@ mod tests {
         assert_eq!(table.tickets[0].row, 4);
         assert_eq!(table.next_id(&cfg), "T-0002");
 
+        // 書式設定済みの空行 (未知列のチェックボックス初期値だけがある行) はチケットにしない。
+        // 期限は表示形式に依らず YYYY-MM-DD で読む
+        let mut rows = rows;
+        rows[3].push("2026/10/9".into());
+        let mut blank = vec![String::new(); 13];
+        blank.push("FALSE".into());
+        rows.push(blank);
+        let table = Table::from_rows(&rows, &cfg).unwrap();
+        assert_eq!(table.tickets.len(), 1);
+        assert_eq!(table.tickets[0].get(Col::DueDate), "2026-10-09");
+
         // ヘッダ行の指定がずれていればスキーマエラー
         cfg.sheets.header_row = 1;
         assert!(Table::from_rows(&rows, &cfg).is_err());

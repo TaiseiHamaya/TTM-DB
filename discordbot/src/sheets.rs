@@ -98,8 +98,28 @@ impl Sheets {
             .collect())
     }
 
+    /// シートの行数 (値の有無に関わらずグリッドの行数)
+    pub async fn row_count(&self, sheet: &str) -> Result<usize> {
+        let body = self
+            .send(self.http.get(self.url(&[])).query(&[(
+                "fields",
+                "sheets.properties(title,gridProperties.rowCount)",
+            )]))
+            .await?;
+        body["sheets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|s| &s["properties"])
+            .find(|p| p["title"] == sheet)
+            .and_then(|p| p["gridProperties"]["rowCount"].as_u64())
+            .map(|n| n as usize)
+            .with_context(|| format!("シート {sheet} の行数を取得できません"))
+    }
+
     /// `start_row` 行目から始まる表の末尾に1行追加し、追加された行番号 (1始まり) を返す。
-    /// 表の上にタイトル行などがあっても、その下に誤って追加しないよう開始行を指定する
+    /// 表の上にタイトル行などがあっても、その下に誤って追加しないよう開始行を指定する。
+    /// 値は USER_ENTERED で解釈されるので、文字列は `text` で包んで渡す
     pub async fn append_row(&self, sheet: &str, start_row: usize, row: Vec<String>) -> Result<usize> {
         let range = format!("{}!A{start_row}", quote_sheet(sheet));
         let url = self.url(&["values", &format!("{range}:append")]);
@@ -108,7 +128,7 @@ impl Sheets {
                 self.http
                     .post(url)
                     .query(&[
-                        ("valueInputOption", "RAW"),
+                        ("valueInputOption", "USER_ENTERED"),
                         ("insertDataOption", "INSERT_ROWS"),
                     ])
                     .json(&json!({ "values": [row] })),
@@ -120,7 +140,8 @@ impl Sheets {
         parse_row_of_range(updated).context("updatedRange の行番号を解釈できません")
     }
 
-    /// 複数セルを個別に更新する。(A1範囲, 値) の組。未指定セルには触れない
+    /// 複数セルを個別に更新する。(A1範囲, 値) の組。未指定セルには触れない。
+    /// 値は USER_ENTERED で解釈されるので、文字列は `text` で包んで渡す
     pub async fn update_cells(&self, cells: Vec<(String, String)>) -> Result<()> {
         if cells.is_empty() {
             return Ok(());
@@ -133,7 +154,7 @@ impl Sheets {
         self.send(
             self.http
                 .post(url)
-                .json(&json!({ "valueInputOption": "RAW", "data": data })),
+                .json(&json!({ "valueInputOption": "USER_ENTERED", "data": data })),
         )
         .await?;
         Ok(())
@@ -145,6 +166,16 @@ fn value_to_string(v: Value) -> String {
         Value::String(s) => s,
         Value::Null => String::new(),
         other => other.to_string(),
+    }
+}
+
+/// USER_ENTERED で書く値を文字列に固定する (先頭の ' はセルの値に含まれない)。
+/// 数式・数値・日付として解釈されるのを防ぐ。空なら空のまま (セルを空にする)
+pub fn text(v: &str) -> String {
+    if v.is_empty() {
+        String::new()
+    } else {
+        format!("'{v}")
     }
 }
 

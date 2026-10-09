@@ -58,7 +58,7 @@ async fn on_interaction(app: &Data, i: &Interaction) -> Result<()> {
                 .strip_prefix(create::PREFIX)
                 .and_then(|s| s.strip_prefix(':'))
             {
-                create::on_component(app, i, d, rest).await
+                create::on_component(app, i, rest).await
             } else {
                 Ok(())
             }

@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use anyhow::{Context as _, Result, anyhow, bail};
 use chrono::{DateTime, NaiveDate};
 use twilight_http::request::channel::reaction::RequestReactionType;
-use twilight_model::http::attachment::Attachment;
 use twilight_model::id::Id;
 use twilight_model::id::marker::{ChannelMarker, UserMarker};
 
@@ -28,15 +27,6 @@ pub struct NewTicket {
     pub priority: String,
     pub due_date: String,
     pub parent_id: Option<String>,
-    /// 発行フォームで添付された画像
-    pub images: Vec<NewImage>,
-}
-
-/// 発行時の添付画像。Post に再投稿し、失敗したら元の URL をそのまま記録する
-pub struct NewImage {
-    pub filename: String,
-    pub bytes: Vec<u8>,
-    pub source_url: String,
 }
 
 pub struct Created {
@@ -150,12 +140,6 @@ pub async fn create_ticket(app: &App, input: NewTicket) -> Result<Created> {
         .cloned()
         .context("追記したチケットを再読込できません")?;
     let (post_id, url) = create_post(app, &table, &ticket, &m).await?;
-    if !input.images.is_empty()
-        && let Err(e) = attach_images(app, &ticket, post_id, input.images).await
-    {
-        tracing::warn!(error = %e, ticket_id = %ticket_id, "添付画像の登録に失敗");
-        warnings.push(format!("添付画像の登録に失敗しました: {e:#}"));
-    }
 
     // 親 Post へ子のリンクを投稿
     if let Some(parent) = parent_id.as_deref().and_then(|p| table.find(p))
@@ -186,31 +170,6 @@ pub async fn create_ticket(app: &App, input: NewTicket) -> Result<Created> {
         url,
         warnings,
     })
-}
-
-/// 発行フォームの画像を Post に投稿し、その URL を image_urls に記録する。
-/// 再投稿に失敗した画像は元の URL を記録する
-async fn attach_images(app: &App, t: &Ticket, post_id: u64, images: Vec<NewImage>) -> Result<()> {
-    let files: Vec<Attachment> = images
-        .iter()
-        .enumerate()
-        .map(|(i, img)| Attachment::from_bytes(img.filename.clone(), img.bytes.clone(), i as u64))
-        .collect();
-    let urls: Vec<String> = match app
-        .http
-        .create_message(Id::new(post_id))
-        .content("発行時に添付された画像")
-        .attachments(&files)
-        .await
-    {
-        Ok(res) => res.model().await?.attachments.into_iter().map(|a| a.url).collect(),
-        Err(e) => {
-            tracing::warn!(error = %e, ticket_id = %t.id(), "画像の再投稿に失敗。元の URL を記録");
-            images.into_iter().map(|i| i.source_url).collect()
-        }
-    };
-    add_images_locked(app, post_id, urls).await?;
-    Ok(())
 }
 
 /// Forum Post を作り、post_id と URL を Sheets に書き戻す

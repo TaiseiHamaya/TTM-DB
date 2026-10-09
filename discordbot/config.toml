@@ -66,11 +66,17 @@ max_forum_tags = 20
 # 接頭辞の無い旧形式のタグは起動時に接頭辞付きの名前へ変更する (付与済みのタグは外れない)。
 # 運用中に接頭辞を変えた場合は /sync tags で旧タグを消して新タグを作り、/sync all で付け直す。
 # 接頭辞込みで Discord のタグ名上限20文字に切り詰める
+# *_emoji はタグ名の前に表示される Unicode 絵文字 (タグ名には含まれず20文字制限に影響しない)。
+# 空にすると絵文字なし。変更は起動時か /sync all・/sync tags で既存タグにも反映する
 [tags]
 status_prefix = "進行度:"
 category_prefix = "種類:"
 priority_prefix = "優先度:"
 assignee_prefix = "担当:"
+status_emoji = "🚦"
+category_emoji = "🧩"
+priority_emoji = "🚩"
+assignee_emoji = "👤"
 
 [discord]
 # スプシ構成破壊などの警告を投稿するテキストチャンネル (任意)

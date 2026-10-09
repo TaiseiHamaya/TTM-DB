@@ -202,7 +202,8 @@ pub struct DiscordConfig {
     pub alert_channel_id: Option<u64>,
 }
 
-/// Forum タグ名の接頭辞 (どの要素のタグかを示す)。タグ名は「接頭辞 + masters の値」になる
+/// Forum タグ名の接頭辞 (どの要素のタグかを示す)。タグ名は「接頭辞 + masters の値」になる。
+/// 絵文字はタグ名とは別にタグへ付く (空ならなし)
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TagsConfig {
@@ -210,6 +211,10 @@ pub struct TagsConfig {
     pub category_prefix: String,
     pub priority_prefix: String,
     pub assignee_prefix: String,
+    pub status_emoji: String,
+    pub category_emoji: String,
+    pub priority_emoji: String,
+    pub assignee_emoji: String,
 }
 
 impl Default for TagsConfig {
@@ -219,6 +224,10 @@ impl Default for TagsConfig {
             category_prefix: "種類:".into(),
             priority_prefix: "優先度:".into(),
             assignee_prefix: "担当:".into(),
+            status_emoji: "🚦".into(),
+            category_emoji: "🧩".into(),
+            priority_emoji: "🚩".into(),
+            assignee_emoji: "👤".into(),
         }
     }
 }
@@ -233,6 +242,18 @@ impl TagsConfig {
             Col::Assignee => &self.assignee_prefix,
             _ => "",
         }
+    }
+
+    /// タグに付ける Unicode 絵文字 (タグにしない列や空設定は None)
+    pub fn emoji(&self, col: Col) -> Option<&str> {
+        let e = match col {
+            Col::Status => &self.status_emoji,
+            Col::Category => &self.category_emoji,
+            Col::Priority => &self.priority_emoji,
+            Col::Assignee => &self.assignee_emoji,
+            _ => "",
+        };
+        (!e.is_empty()).then_some(e)
     }
 }
 
@@ -281,10 +302,9 @@ impl Config {
             self.sheets.masters_sheet = v;
         }
         if let Some(v) = get("TTM_HEADER_ROW") {
-            self.sheets.header_row = v
-                .trim()
-                .parse()
-                .with_context(|| format!("TTM_HEADER_ROW「{v}」は行番号 (1以上の整数) ではありません"))?;
+            self.sheets.header_row = v.trim().parse().with_context(|| {
+                format!("TTM_HEADER_ROW「{v}」は行番号 (1以上の整数) ではありません")
+            })?;
         }
         for (name, value) in all {
             if let Some(key) = name.strip_prefix("TTM_COL_") {

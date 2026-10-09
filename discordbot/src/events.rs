@@ -30,7 +30,11 @@ pub async fn handle(app: Data, event: Event) {
         Event::MemberAdd(m) if m.guild_id == app.guild_id() && !m.member.user.bot => {
             let u = &m.member.user;
             let name = app
-                .sheet_name_of(u.id.get(), &u.name, display_name(m.member.nick.as_deref(), u))
+                .sheet_name_of(
+                    u.id.get(),
+                    &u.name,
+                    display_name(m.member.nick.as_deref(), u),
+                )
                 .await;
             if let Err(e) = ops::add_member(&app, u.id.get(), &name).await {
                 tracing::warn!(error = %e, "参加者の masters 追加に失敗");

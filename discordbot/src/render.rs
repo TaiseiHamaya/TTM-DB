@@ -348,6 +348,32 @@ fn rename_tag(existing: &mut [ForumTag], from: &str, to: &str, report: &mut Vec<
     }
 }
 
+/// `name` のタグの絵文字を `emoji` (None なら絵文字なし) に合わせる。変更したら true
+fn set_tag_emoji(
+    existing: &mut [ForumTag],
+    name: &str,
+    emoji: Option<&str>,
+    report: &mut Vec<String>,
+) -> bool {
+    let Some(tag) = existing.iter_mut().find(|t| t.name == name) else {
+        return false;
+    };
+    match emoji {
+        // 手動で付けたカスタム絵文字 (emoji_id) は残す
+        None if tag.emoji_name.is_none() => return false,
+        Some(e) if tag.emoji_name.as_deref() == Some(e) && tag.emoji_id.is_none() => return false,
+        // カスタム絵文字と Unicode 絵文字は併用できない
+        Some(_) => tag.emoji_id = None,
+        None => {}
+    }
+    tag.emoji_name = emoji.map(str::to_owned);
+    report.push(format!(
+        "タグ絵文字変更: {name} → {}",
+        emoji.unwrap_or("なし")
+    ));
+    true
+}
+
 /// masters を元に不足している Forum タグを追加し、タグ名 -> ID の対応を更新する。
 /// 接頭辞の無い旧形式のタグは接頭辞付きの名前に変更する (ID は維持)。
 /// `/sync tags` (cleanup = true) では、旧名→新名の rename 指定でタグ名を変更し (ID は維持)、
@@ -399,16 +425,20 @@ pub async fn sync_forum_tags(app: &App, cleanup: bool) -> Result<Vec<String>> {
         });
     }
 
+    for ((col, _), name) in wanted.iter().zip(&wanted_names) {
+        changed |= set_tag_emoji(&mut existing, name, app.cfg.tags.emoji(*col), &mut report);
+    }
+
     let mut values: Vec<serde_json::Value> = existing
         .iter()
         .map(|t| serde_json::to_value(t).unwrap_or_else(|_| json!({ "id": t.id, "name": t.name })))
         .collect();
-    for name in wanted_names {
+    for ((col, _), name) in wanted.iter().zip(wanted_names) {
         if values.len() >= max {
             break;
         }
         if !existing.iter().any(|t| t.name == name) {
-            values.push(json!({ "name": name }));
+            values.push(json!({ "name": name, "emoji_name": app.cfg.tags.emoji(*col) }));
             changed = true;
             report.push(format!("タグ追加: {name}"));
         }
@@ -493,5 +523,49 @@ mod tests {
         let m = Masters::default();
         let text = changes_content(&prev, &table.tickets[1], &m, &cfg).unwrap();
         assert!(text.contains("旧 → 新"));
+    }
+
+    #[test]
+    fn tag_emoji_follows_config() {
+        let tag = |name: &str, emoji_name: Option<&str>, emoji_id: Option<u64>| ForumTag {
+            emoji_id: emoji_id.map(Id::new),
+            emoji_name: emoji_name.map(str::to_owned),
+            id: Id::new(1),
+            moderated: false,
+            name: name.to_owned(),
+        };
+        let mut report = Vec::new();
+        let mut tags = vec![tag("進行度:未着手", None, None)];
+
+        assert!(set_tag_emoji(
+            &mut tags,
+            "進行度:未着手",
+            Some("🚦"),
+            &mut report
+        ));
+        assert_eq!(tags[0].emoji_name.as_deref(), Some("🚦"));
+        // 同じ設定なら変更しない
+        assert!(!set_tag_emoji(
+            &mut tags,
+            "進行度:未着手",
+            Some("🚦"),
+            &mut report
+        ));
+        // 空設定なら絵文字を外す
+        assert!(set_tag_emoji(&mut tags, "進行度:未着手", None, &mut report));
+        assert_eq!(tags[0].emoji_name, None);
+        assert!(!set_tag_emoji(
+            &mut tags,
+            "無いタグ",
+            Some("🚦"),
+            &mut report
+        ));
+
+        // カスタム絵文字は Unicode 絵文字で置き換え、空設定なら残す
+        let mut tags = vec![tag("担当:A", None, Some(5))];
+        assert!(!set_tag_emoji(&mut tags, "担当:A", None, &mut report));
+        assert!(set_tag_emoji(&mut tags, "担当:A", Some("👤"), &mut report));
+        assert_eq!(tags[0].emoji_id, None);
+        assert_eq!(report.len(), 3);
     }
 }

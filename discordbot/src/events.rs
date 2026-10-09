@@ -1,4 +1,4 @@
-//! Gateway イベントの振り分け: コマンド・フォーム・ボタン、画像添付検知、GAS からの同期データ、参加者追加
+//! Gateway イベントの振り分け: コマンド・フォーム・ボタン、画像添付検知、参加者追加
 
 use anyhow::Result;
 use twilight_http::request::channel::reaction::RequestReactionType;
@@ -27,7 +27,6 @@ pub async fn handle(app: Data, event: Event) {
             }
         }
         Event::MessageCreate(m) => on_message(&app, &m.0).await,
-        Event::MessageUpdate(m) => on_message_update(&app, &m.0).await,
         Event::MemberAdd(m) if m.guild_id == app.guild_id() && !m.member.user.bot => {
             let u = &m.member.user;
             let name = app
@@ -97,69 +96,8 @@ async fn on_status_button(app: &Data, i: &Interaction, rest: &str) -> Result<()>
     edit_reply(app, i, &text).await
 }
 
-/// 同期用 Webhook のメッセージか
-fn is_sheet_push(app: &Data, msg: &Message) -> bool {
-    matches!(
-        (msg.webhook_id, app.cfg.discord.sync_webhook_id),
-        (Some(hook), Some(expected)) if hook.get() == expected
-    )
-}
-
-/// スプシの GAS が Webhook で送った同期データ (添付 JSON) を Discord に反映する。
-/// /sync による新規投稿と、スプシ編集時に GAS が差し替える固定メッセージの更新の両方で呼ばれる。
-/// 固定メッセージは何度も届くので、成功・失敗のリアクションを付け替えて最新の結果を示す
-async fn on_sheet_push(app: &Data, msg: &Message) {
-    let result = async {
-        let file = msg
-            .attachments
-            .iter()
-            .find(|a| a.filename.ends_with(".json"))
-            .ok_or_else(|| anyhow::anyhow!("同期データの JSON が添付されていません"))?;
-        let bytes = app
-            .web
-            .get(&file.url)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?;
-        let snap: ops::Snapshot = serde_json::from_slice(&bytes)?;
-        ops::apply_snapshot(app, snap).await
-    }
-    .await;
-    let (add, remove) = match result {
-        // 処理済みの内容 (同じ更新の重複通知など) はリアクションを変えない
-        Ok(None) => return,
-        Ok(Some(n)) => {
-            tracing::info!(count = n, message_id = msg.id.get(), "スプシからの同期データを反映");
-            (&OK, &NG)
-        }
-        Err(e) => {
-            tracing::error!(error = %e, message_id = msg.id.get(), "スプシからの同期データの反映に失敗");
-            (&NG, &OK)
-        }
-    };
-    let _ = app
-        .http
-        .delete_current_user_reaction(msg.channel_id, msg.id, remove)
-        .await;
-    let _ = app.http.create_reaction(msg.channel_id, msg.id, add).await;
-}
-
-/// GAS が固定メッセージの sync.json を差し替えたら反映する
-async fn on_message_update(app: &Data, msg: &Message) {
-    if is_sheet_push(app, msg) && !msg.attachments.is_empty() {
-        on_sheet_push(app, msg).await;
-    }
-}
-
-/// Forum Post 内に画像が投稿されたら image_urls に追記する。
-/// GAS の Webhook 投稿なら同期データとして処理する
+/// Forum Post 内に画像が投稿されたら image_urls に追記する
 async fn on_message(app: &Data, msg: &Message) {
-    if is_sheet_push(app, msg) {
-        on_sheet_push(app, msg).await;
-        return;
-    }
     if msg.author.bot || msg.guild_id != Some(app.guild_id()) {
         return;
     }

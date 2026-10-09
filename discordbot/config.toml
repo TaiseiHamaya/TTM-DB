@@ -50,6 +50,10 @@ rename_key = "rename"
 [sync]
 # 最後に Discord へ反映した内容ハッシュの保存先
 state_file = "data/sync_state.json"
+# スプシ編集の通知を受け取る Pub/Sub サブスクリプション (README の「スプシ編集の即時反映」参照)。
+# スプシの GAS (gas/sync.gs) が編集のたびにトピックへ送り、Bot はここから受け取って Sheets を読み直す。
+# 未設定だとスプシ側の編集は Discord に反映されない (/sync で手動反映のみ)
+# pubsub_subscription = "projects/<プロジェクトID>/subscriptions/<名前>"
 
 [ticket]
 id_prefix = "T-"
@@ -61,13 +65,6 @@ max_forum_tags = 20
 [discord]
 # スプシ構成破壊などの警告を投稿するテキストチャンネル (任意)
 # alert_channel_id = 123456789012345678
-# スプシの GAS (gas/sync.gs) が投稿する Webhook の ID。
-# Webhook URL https://discord.com/api/webhooks/<ID>/<トークン> の <ID> 部分。
-# 未設定だとスプシ側の編集は Discord に反映されない (/sync で手動反映のみ)
-# sync_webhook_id = 123456789012345678
-# 同期用のテキストチャンネル (sync_webhook_id の Webhook があるチャンネル)。
-# /sync ticket・/sync all の実行時に Bot が sync.json を記録として投稿する。未設定なら投稿しない
-# sync_channel_id = 123456789012345678
 
 # Discord ユーザーとスプシ上の表示名の対応。
 # キーは Discord ユーザーID (推奨) またはユーザー名 (@ の後ろのハンドル)、値はスプシに書く名前。

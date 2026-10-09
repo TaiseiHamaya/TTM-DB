@@ -102,7 +102,7 @@ impl Masters {
         Self::parse(&rows, cfg)
     }
 
-    /// masters シート A:C の値から組み立てる (GAS からの送信内容にも使う)
+    /// masters シート A:C の値から組み立てる
     pub fn parse(rows: &[Vec<String>], cfg: &Config) -> Result<Self> {
         let k = &cfg.masters;
         let mut m = Masters::default();

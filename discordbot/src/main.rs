@@ -6,6 +6,7 @@ mod events;
 mod interact;
 mod masters;
 mod ops;
+mod pubsub;
 mod render;
 mod sheets;
 mod store;
@@ -55,6 +56,9 @@ async fn main() -> Result<()> {
         application_id,
     ));
     setup(&app).await?;
+    if let Some(sub) = app.cfg.sync.pubsub_subscription.clone() {
+        pubsub::spawn(app.clone(), sub);
+    }
 
     let intents = Intents::GUILDS
         | Intents::GUILD_MESSAGES
@@ -63,7 +67,6 @@ async fn main() -> Result<()> {
     let wanted = EventTypeFlags::READY
         | EventTypeFlags::INTERACTION_CREATE
         | EventTypeFlags::MESSAGE_CREATE
-        | EventTypeFlags::MESSAGE_UPDATE
         | EventTypeFlags::MEMBER_ADD;
     let mut shard = Shard::new(ShardId::ONE, env.discord_token, intents);
     tracing::info!("TTM-DB 起動");
@@ -104,9 +107,9 @@ async fn setup(app: &App) -> Result<()> {
         Ok(_) => {}
         Err(e) => tracing::error!(error = %e, "Forum タグの同期に失敗"),
     }
-    if app.cfg.discord.sync_webhook_id.is_none() {
+    if app.cfg.sync.pubsub_subscription.is_none() {
         tracing::warn!(
-            "discord.sync_webhook_id が未設定のため、スプシ側の編集は Discord に反映されません"
+            "sync.pubsub_subscription が未設定のため、スプシ側の編集は Discord に反映されません"
         );
     }
     Ok(())

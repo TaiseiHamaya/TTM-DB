@@ -60,18 +60,45 @@ Discord でタスクチケットの発行と状態管理を行う Bot です。�
 3. Forum チャンネル `#tickets` を作成する。削除権限は管理者のみにする
 4. (任意) 警告投稿用のテキストチャンネルを `config.toml` の `discord.alert_channel_id` に設定する
 
-### 4. スプシの GAS を設定する (スプシ → Discord の同期)
+### 4. スプシ編集の即時反映を設定する (Pub/Sub と GAS)
 
-Bot はスプシを定期取得しません。スプシが編集されると、GAS は同期チャンネルの固定メッセージ1件の添付 (sync.json) を tickets / masters の最新内容に差し替えます (新しい投稿はしません)。Bot はそのメッセージの更新を受けて Forum Post に反映します。Discord で `/sync ticket` / `/sync all` を実行したときは、Bot が Sheets を読んで同じ形式の sync.json を同期チャンネルに1回投稿し、記録として残します。
+人がスプシを編集すると、GAS (`gas/sync.gs`) が Google Cloud Pub/Sub のトピックに「編集があった」合図を送ります。Bot はサブスクリプションから合図を受け取り、Sheets API でシートを読み直して、変わったチケットを Forum Post に反映します。続けて編集された場合は、1.5秒待ってまとめて1回だけ読みます。Bot から Pub/Sub に接続しに行くだけなので、Bot を外部に公開する必要はありません。
 
-1. Discord に同期用のテキストチャンネル (例: `#ticket-sync`、Bot 以外は閲覧不要) を作り、チャンネル設定 > 連携サービス > ウェブフックで Webhook を作成して URL をコピーする
-2. Webhook URL `https://discord.com/api/webhooks/<ID>/<トークン>` の `<ID>` を `config.toml` の `discord.sync_webhook_id` に書く。Bot はこの Webhook の投稿だけを同期データとして受け付ける。同じチャンネルの ID を `discord.sync_channel_id` に書く (`/sync` の記録の投稿先)
-3. スプシの 拡張機能 > Apps Script に `gas/sync.gs` を貼り、先頭の `TICKETS_SHEET` / `MASTERS_SHEET` を 2 で決めたシート名にする
-4. プロジェクトの設定 > スクリプト プロパティに `DISCORD_WEBHOOK_URL` = 1 の URL を追加する
-5. エディタで `setupTrigger` を1回実行し、権限を承認する (編集トリガーが作られ、旧版の変更トリガーは削除される)
-6. 固定メッセージは初回の編集時に GAS が自動で投稿し、その ID をスクリプト プロパティ `SYNC_MESSAGE_ID` に保存する。固定メッセージを消した場合は次の編集時に作り直される
+**Google Cloud (Service Account と同じプロジェクト)**
 
-固定メッセージには、Bot が反映に成功すると ✅、失敗すると ⚠ のリアクションが付きます (最新の結果に付け替わります)。Bot が Sheets API で書き込んだ変更 (チケット発行など) では送信されません。行の削除など、セルの編集にならない変更は `/sync all` で反映してください。
+1. Pub/Sub API を有効にする
+2. トピックを作る (例: `ttm-db-sheet-edited`)。「デフォルトのサブスクリプションを追加する」はオフでよい
+3. そのトピックにサブスクリプションを作る (例: `ttm-db-bot`)。配信タイプは **プル**、他は既定のまま
+4. 権限を付ける
+   - サブスクリプションに、Bot の Service Account を **Pub/Sub サブスクライバー** で追加する
+   - トピックに、スプシの GAS を実行する Google アカウント (トリガーを作る人) を **Pub/Sub パブリッシャー** で追加する。プロジェクトのオーナー・編集者なら不要
+   - GAS は API の利用をこのプロジェクトに付けて送るため、その Google アカウントにはプロジェクトの Service Usage ユーザー権限 (`serviceusage.services.use`) も要る。オーナー・編集者なら付いている
+
+gcloud の場合:
+
+```sh
+gcloud services enable pubsub.googleapis.com
+gcloud pubsub topics create ttm-db-sheet-edited
+gcloud pubsub subscriptions create ttm-db-bot --topic=ttm-db-sheet-edited
+gcloud pubsub subscriptions add-iam-policy-binding ttm-db-bot \
+  --member=serviceAccount:<Service Account のメール> --role=roles/pubsub.subscriber
+```
+
+**Bot**
+
+5. `config.toml` の `sync.pubsub_subscription` に `projects/<プロジェクトID>/subscriptions/ttm-db-bot` を書く
+
+**GAS**
+
+6. スプシの 拡張機能 > Apps Script に `gas/sync.gs` を貼り、先頭の `TICKETS_SHEET` / `MASTERS_SHEET` を 2 で決めたシート名にする
+7. プロジェクトの設定で「`appsscript.json` マニフェスト ファイルをエディタで表示する」をオンにし、`appsscript.json` を `gas/appsscript.json` の内容にする (Pub/Sub のスコープを追加するため)
+8. プロジェクトの設定 > スクリプト プロパティに `PUBSUB_TOPIC` = `projects/<プロジェクトID>/topics/ttm-db-sheet-edited` を追加する
+9. エディタで `setupTrigger` を1回実行し、権限を承認する (編集トリガーが作られ、旧版のトリガーは削除される)
+10. エディタで `testPublish` を実行し、Bot のログに「スプシの編集を反映」が出れば完了
+
+Bot が Sheets API で書き込んだ変更 (チケット発行など) では合図は送られません。行の削除など、セルの編集にならない変更は `/sync all` で反映してください。受信や反映に失敗し続けると、`discord.alert_channel_id` に警告が投稿されます。
+
+旧版 (Discord Webhook に sync.json を送る方式) から移行する場合は、スクリプト プロパティの `DISCORD_WEBHOOK_URL` / `SYNC_MESSAGE_ID`、`config.toml` の `discord.sync_webhook_id` / `discord.sync_channel_id`、同期用の Webhook とチャンネルは不要なので削除してください。
 
 ### 5. 起動
 
@@ -106,12 +133,12 @@ journalctl -u ttm-db -f
 | `/ticket status id status` | 進行度を変更 (ボタンの代替) |
 | `/list [status] [category] [assignee] [priority]` | 一覧 (最大20件) |
 | `/search query` | タイトル・詳細・ID の部分一致検索 |
-| `/sync ticket id` | 指定チケットを Sheets から即時同期し、sync.json を同期チャンネルに投稿 |
+| `/sync ticket id` | 指定チケットを Sheets から即時同期 |
 | `/sync check` | マスタ不整合・必須欠落・ID重複などを検査 |
 | `/sync all` / `tags` / `members` | 管理者のみ。Sheets を読み直して全件強制同期 / タグ名変更反映 / 参加者取込 |
 
 ## 注意点
 
 - `image_urls` に保存する画像 URL は Discord CDN の URL で、一定時間で失効します。元の画像は Post 内のメッセージに残ります
-- 初回起動後 (`data/sync_state.json` がまだ無いとき) に最初に届いたスプシの送信内容は、既存行を同期済みとみなして記録だけ行います。Discord に反映が必要なら `/sync all` を実行してください
-- Bot が停止中にスプシを編集した場合、その変更は次にスプシが編集されたとき (または `/sync all`) に反映されます
+- 初回起動後 (`data/sync_state.json` がまだ無いとき) にスプシ編集の合図で最初に同期するときは、既存行を同期済みとみなして記録だけ行います。Discord に反映が必要なら `/sync all` を実行してください
+- Bot が停止中にスプシを編集した場合、合図はサブスクリプションに残り (既定で7日間)、Bot の起動後に反映されます

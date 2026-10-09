@@ -15,20 +15,20 @@
 
 ```text
 Discord <-> Bot -> Google Sheets
-Google Sheets (GAS) -> Discord Webhook -> Bot
+Google Sheets (GAS) -> Cloud Pub/Sub -> Bot (pull) -> Google Sheets を読み直す
 ```
 
 - Discord は入力と表示と通知を担う
 - Bot は Slash Commands と Modal と Button と Forum タグ操作と Sheets API を担う
 - Sheets はチケット台帳とマスタ定義を担う。全状態の正本とする
-- Sheets の GAS は人が編集したときに Discord Webhook へシート内容を送る。Bot はこれを受けて Discord に反映する。/sync 実行時は Bot が Sheets を読んで反映し、記録として sync.json を投稿する
+- Sheets の GAS は人が編集したときに Cloud Pub/Sub のトピックへ合図を送る。Bot はサブスクリプションから合図を受け取り、Sheets を読み直して Discord に反映する。/sync 実行時も Bot が Sheets を読んで反映する
 
 ### 技術候補
 
 - twilight 0.17 (twilight-gateway, twilight-http, twilight-model, twilight-util) を用いる。Modal 内の選択メニュー (Label) とファイルアップロードに対応しているため採用した
 - Sheets API は reqwest で直接呼び出し、認証は yup-oauth2 による Service Account 認証とする。非同期ランタイムは tokio とする
 - 設定項目は DISCORD_TOKEN、GUILD_ID、FORUM_CHANNEL_ID、SPREADSHEET_ID、GOOGLE_SA_JSON とする
-- マスタと列定義はコード直書きを禁止する。config.toml と Sheets マスタシートから起動時に読み込み、以降は GAS から送られる内容で更新する
+- マスタと列定義はコード直書きを禁止する。config.toml と Sheets マスタシートから起動時に読み込み、以降はスプシ編集の合図を受けて読み直す
 
 ## 3. チャンネル設計
 
@@ -83,7 +83,7 @@ Forum チャンネル #tickets 1つを置き場とする。
 
 ### masters シート
 
-選択肢は masters シートで管理し、Bot は起動時に読み込む。以降は masters 編集時に GAS から送られる内容で更新する。
+選択肢は masters シートで管理し、Bot は起動時に読み込む。以降は masters 編集の合図を受けて読み直す。
 
 ```text
 masters の A列と B列に key と value を置く
@@ -149,10 +149,13 @@ Discord の Modal は部品5つまでで、Modal の送信に続けて別の Mod
 
 スプシ側変更が高頻度のため、双方向同期とする。
 
-- 通常は Discord 操作時に即 Sheets 更新し、Sheets 編集時はスプシの GAS から Discord へ送って反映する。Bot から Sheets への定期取得 (ポーリング) は行わない
-- GAS はインストール型の編集トリガー (onEdit) で tickets と masters の表示値を読み、JSON 添付として Discord Webhook で送る。Bot は設定した Webhook ID の投稿だけを受け付け、内容ハッシュで差分検出し、Forum タイトルとタグと先頭 Embed を更新する
-- 変更トリガー (onChange) は Bot の API 書き込みでも動き、チケット発行のたびに送信されるため使わない。編集トリガーは API 書き込みでは動かないため、送信はループしない。GAS が読んだ時刻より後に Bot が反映したチケットと、順序が入れ替わって届いた古い送信内容は適用しない
-- 編集トリガーでは新しい投稿をせず、同期チャンネルの固定メッセージ1件の sync.json を Webhook のメッセージ編集で差し替える。Bot は MESSAGE_UPDATE で受けて反映する。固定メッセージの ID は GAS のスクリプト プロパティに保存し、消えていたら作り直す。/sync ticket と /sync all の実行時は Bot が Sheets を読んで GAS と同じ形式の sync.json を同期チャンネル (discord.sync_channel_id) に投稿し、記録として残す。Bot 自身の投稿は同期データとして処理しない
+- 通常は Discord 操作時に即 Sheets 更新し、Sheets 編集時はスプシの GAS が送る合図を受けて即時反映する。Bot から Sheets への定期取得 (ポーリング) は行わない
+- GAS はインストール型の編集トリガー (onEdit) で、tickets か masters が編集されたら Cloud Pub/Sub のトピックへ合図を送る。合図にシートの内容は載せない。Bot はサブスクリプションをロングポーリング (REST の pull) で受信して ack し、1.5秒待って続けて届いた合図をまとめてから、Sheets の masters と tickets を読み直す。内容ハッシュで差分検出し、Forum タイトルとタグと先頭 Embed を更新する
+- 合図は少なくとも1回の配信で、重複や順序の入れ替わりがあり得る。合図を受けるたびに最新の Sheets を読んで差分だけ反映するため、どちらも結果に影響しない。Bot の停止中に届いた合図はサブスクリプションに残り、起動後に反映される
+- Pub/Sub を使う理由は、Apps Script の送信元 IP が多数の利用者で共有されており、Discord Webhook へ送ると Discord 手前の Cloudflare に IP 単位でレート制限 (error code: 1015) されることがあるためである。Pub/Sub なら GAS と Bot のどちらも Google に接続しに行くだけで、Bot を外部に公開する受け口も要らない
+- GAS はユーザーの OAuth トークン (ScriptApp.getOAuthToken) で送り、x-goog-user-project で API 利用をトピックのプロジェクトに付ける。Bot は Sheets と同じ Service Account で pubsub スコープのトークンを取って受信する
+- 変更トリガー (onChange) は Bot の API 書き込みでも動き、チケット発行のたびに送信されるため使わない。編集トリガーは API 書き込みでは動かないため、送信はループしない
+- 受信の失敗が3回続いたとき、および反映に失敗したときは警告チャンネルに投稿し、回復したら知らせる
 - 手動として /sync を用意する。ticket_id 指定で即時同期し、check 付きでマスタ不整合と必須欠落を検査する
 - 競合解決は updated_at が新しい方を勝ちとする Last-Write-Wins とする。Discord 編集中に Sheets が先に更新されていたら Discord 側操作を拒否して再読込誘導する
 - 同時発番対策として ticket_id 発番は Sheets 再読込とユニーク確認後に確定する。重複時はサフィックス付与して警告投稿する

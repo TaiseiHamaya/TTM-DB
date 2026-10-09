@@ -48,9 +48,14 @@ impl Sheets {
     }
 
     async fn token(&self) -> Result<String> {
+        self.google_token(SCOPES).await
+    }
+
+    /// 同じ Service Account で、指定スコープの Google API アクセストークンを取得する (Pub/Sub など)
+    pub async fn google_token(&self, scopes: &[&str]) -> Result<String> {
         let tok = self
             .auth
-            .token(SCOPES)
+            .token(scopes)
             .await
             .context("アクセストークン取得失敗")?;
         tok.token()

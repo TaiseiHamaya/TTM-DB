@@ -1,4 +1,4 @@
-//! チケット操作の本体。コマンド・ボタン・イベント・スプシ (GAS) からの同期で呼ばれる。
+//! チケット操作の本体。コマンド・ボタン・イベント・スプシ編集の通知 (Pub/Sub) からの同期で呼ばれる。
 
 use std::collections::HashMap;
 
@@ -13,7 +13,6 @@ use crate::app::App;
 use crate::config::Col;
 use crate::masters::{Masters, StatusRole, can_transition};
 use crate::render::{self, mention_only};
-use crate::sheets::quote_sheet;
 use crate::store::{SchemaError, Table, Ticket};
 
 const FAIL_REACTION: RequestReactionType<'static> = RequestReactionType::Unicode { name: "⚠" };
@@ -258,8 +257,6 @@ async fn create_post(app: &App, table: &Table, t: &Ticket, m: &Masters) -> Resul
     t.set(Col::DiscordUrl, url.clone());
     let mut st = app.sync_state.lock().await;
     st.hashes.insert(t.id().to_owned(), t.content_hash());
-    st.pushed_at
-        .insert(t.id().to_owned(), chrono::Utc::now().timestamp_millis());
     st.save();
     Ok((post_id.get(), url))
 }
@@ -276,8 +273,6 @@ pub async fn push_ticket(app: &App, table: &Table, t: &Ticket) -> Result<()> {
     match &result {
         Ok(()) => {
             st.hashes.insert(t.id().to_owned(), t.content_hash());
-            st.pushed_at
-                .insert(t.id().to_owned(), chrono::Utc::now().timestamp_millis());
             if st.failed.remove(t.id())
                 && let Some(post_id) = t.post_id()
             {
@@ -578,75 +573,15 @@ pub async fn load_checked(app: &App) -> Result<Option<Table>> {
     check_schema(app, table).await
 }
 
-/// スプシの GAS が Webhook で送ってくる内容 (各シートの表示値)
-#[derive(Debug, serde::Deserialize)]
-pub struct Snapshot {
-    /// GAS がシートを読んだ時刻 (UNIX ミリ秒)
-    pub read_at: i64,
-    /// tickets シート全体 (1行目がヘッダ)
-    pub tickets: Option<Vec<Vec<String>>>,
-    /// masters シートの A:C
-    pub masters: Option<Vec<Vec<String>>>,
-}
-
-/// GAS から届いたシート内容を Discord に反映する (Bot から Sheets は読まない)。
-/// 処理済みより古い (または同じ) 内容なら何もせず None を返す
-pub async fn apply_snapshot(app: &App, snap: Snapshot) -> Result<Option<usize>> {
-    let _guard = app.write_lock.lock().await;
-    {
-        let mut st = app.sync_state.lock().await;
-        if snap.read_at <= st.last_snapshot_at {
-            tracing::info!(read_at = snap.read_at, "古いスプシ送信内容のため無視");
-            return Ok(None);
-        }
-        st.last_snapshot_at = snap.read_at;
-    }
-    if let Some(rows) = &snap.masters {
-        let m = Masters::parse(rows, &app.cfg).context("masters の内容が不正です")?;
-        *app.masters.write().await = m;
-        if let Err(e) = render::sync_forum_tags(app, false).await {
-            tracing::error!(error = %e, "Forum タグの同期に失敗");
-        }
-    }
-    let Some(rows) = &snap.tickets else {
-        return Ok(Some(0));
-    };
-    let Some(table) = check_schema(app, Table::from_rows(rows, &app.cfg)).await? else {
-        return Ok(Some(0));
-    };
-    app.cache_table(&table).await;
-    sync_table(app, &table, false, Some(snap.read_at)).await.map(Some)
-}
-
-/// /sync 実行時の記録として、Sheets の tickets / masters を GAS と同じ形式の sync.json にして
-/// 同期チャンネルへ Bot が投稿する。Bot の投稿は同期データとしては処理されない。
-/// discord.sync_channel_id が未設定なら何もしない
-pub async fn post_snapshot(app: &App) -> Result<()> {
-    let Some(channel) = app.cfg.discord.sync_channel_id else {
-        return Ok(());
-    };
-    let tickets = app
-        .sheets
-        .get(&quote_sheet(&app.cfg.sheets.tickets_sheet))
-        .await?;
-    let masters = app
-        .sheets
-        .get(&format!("{}!A:C", quote_sheet(&app.cfg.sheets.masters_sheet)))
-        .await?;
-    let rows = tickets.len().saturating_sub(1);
-    let snapshot = serde_json::json!({
-        "read_at": chrono::Utc::now().timestamp_millis(),
-        "tickets": tickets,
-        "masters": masters,
-    });
-    let file = Attachment::from_bytes("sync.json".to_owned(), serde_json::to_vec(&snapshot)?, 0);
-    app.http
-        .create_message(Id::new(channel))
-        .content(&format!("TTM-DB sync: tickets {rows}行"))
-        .attachments(&[file])
+/// スプシ編集の通知 (Pub/Sub) を受けて masters と tickets を読み直し、変わったチケットを Discord に反映する
+pub async fn sync_from_sheets(app: &App) -> Result<usize> {
+    app.reload_masters()
         .await
-        .context("同期チャンネルへの投稿に失敗しました")?;
-    Ok(())
+        .context("masters シートの読み込みに失敗しました")?;
+    if let Err(e) = render::sync_forum_tags(app, false).await {
+        tracing::error!(error = %e, "Forum タグの同期に失敗");
+    }
+    sync_all(app, false).await
 }
 
 /// Sheets 全行を読み直して Discord に反映する (/sync all など手動用)
@@ -655,17 +590,11 @@ pub async fn sync_all(app: &App, force: bool) -> Result<usize> {
     let Some(table) = load_checked(app).await? else {
         return Ok(0);
     };
-    sync_table(app, &table, force, None).await
+    sync_table(app, &table, force).await
 }
 
-/// 前回反映時から内容が変わったチケットを Discord に反映する。
-/// `read_at` があれば、その時刻より後に Bot が反映したチケットは (送信内容の方が古いので) 飛ばす
-async fn sync_table(
-    app: &App,
-    table: &Table,
-    force: bool,
-    read_at: Option<i64>,
-) -> Result<usize> {
+/// 前回反映時から内容が変わったチケットを Discord に反映する
+async fn sync_table(app: &App, table: &Table, force: bool) -> Result<usize> {
     let fresh = {
         let mut st = app.sync_state.lock().await;
         std::mem::take(&mut st.fresh)
@@ -677,18 +606,7 @@ async fn sync_table(
             continue;
         }
         let hash = t.content_hash();
-        let (last, pushed_at) = {
-            let st = app.sync_state.lock().await;
-            (
-                st.hashes.get(t.id()).copied(),
-                st.pushed_at.get(t.id()).copied(),
-            )
-        };
-        if let (Some(read_at), Some(pushed_at)) = (read_at, pushed_at)
-            && pushed_at > read_at
-        {
-            continue;
-        }
+        let last = app.sync_state.lock().await.hashes.get(t.id()).copied();
         let need =
             force || t.post_id().is_none() || (last != Some(hash) && !(fresh && last.is_none()));
         if !need {
@@ -898,35 +816,6 @@ mod tests {
         // ヘッダ行の指定がずれていればスキーマエラー
         cfg.sheets.header_row = 1;
         assert!(Table::from_rows(&rows, &cfg).is_err());
-    }
-
-    #[test]
-    fn snapshot_from_gas() {
-        let cfg = crate::config::Config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"))
-            .unwrap();
-        let json = r#"{
-            "read_at": 1791000000000,
-            "tickets": [
-                ["memo", "ticket_id", "discord_post_id", "title", "body", "status", "category",
-                 "assignee", "reporter", "priority", "due_date", "created_at", "updated_at",
-                 "discord_url"],
-                ["x", "T-0001", "", "件名", "詳細", "未着手", "バグ", "田中", "佐藤", "高",
-                 "2026-10-10", "", "", ""],
-                ["", "", "", "", "", "", "", "", "", "", "", "", "", ""]
-            ],
-            "masters": null
-        }"#;
-        let snap: Snapshot = serde_json::from_str(json).unwrap();
-        assert!(snap.masters.is_none());
-        let table = Table::from_rows(snap.tickets.as_ref().unwrap(), &cfg).unwrap();
-        assert_eq!(table.tickets.len(), 1);
-        assert_eq!(table.tickets[0].row, 2);
-        assert_eq!(table.tickets[0].get(Col::Title), "件名");
-
-        // 必須列が無ければスキーマエラー
-        let broken = vec![vec!["ticket_id".to_owned()]];
-        let err = Table::from_rows(&broken, &cfg).unwrap_err();
-        assert!(err.downcast_ref::<SchemaError>().is_some());
     }
 
     #[test]

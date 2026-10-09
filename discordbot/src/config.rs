@@ -178,6 +178,9 @@ pub struct MastersConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SyncConfig {
     pub state_file: String,
+    /// スプシ編集の通知を受け取る Pub/Sub サブスクリプション
+    /// (projects/<プロジェクトID>/subscriptions/<名前>)。未設定ならスプシ側の編集は反映しない
+    pub pubsub_subscription: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -195,10 +198,6 @@ pub struct TicketConfig {
 pub struct DiscordConfig {
     /// スキーマ破壊などの警告を投稿するテキストチャンネル。未設定ならログのみ
     pub alert_channel_id: Option<u64>,
-    /// スプシの GAS が投稿に使う Webhook の ID。この Webhook の投稿だけを同期データとして受け付ける
-    pub sync_webhook_id: Option<u64>,
-    /// 同期用のテキストチャンネル。/sync 実行時に Bot が sync.json を記録として投稿する。未設定なら投稿しない
-    pub sync_channel_id: Option<u64>,
 }
 
 impl Config {
@@ -209,6 +208,13 @@ impl Config {
         cfg.apply_env(|name| std::env::var(name).ok(), std::env::vars())?;
         if cfg.sheets.header_row == 0 {
             bail!("sheets.header_row は1以上を指定してください");
+        }
+        if let Some(sub) = &cfg.sync.pubsub_subscription
+            && !is_subscription_path(sub)
+        {
+            bail!(
+                "sync.pubsub_subscription「{sub}」は projects/<プロジェクトID>/subscriptions/<名前> 形式で指定してください"
+            );
         }
         for key in cfg.columns.names.keys().chain(cfg.columns.required.iter()) {
             Col::parse(key, "config.toml の columns")?;
@@ -311,9 +317,26 @@ impl Config {
     }
 }
 
+/// "projects/<プロジェクトID>/subscriptions/<名前>" 形式か
+fn is_subscription_path(s: &str) -> bool {
+    matches!(
+        s.split('/').collect::<Vec<_>>()[..],
+        ["projects", project, "subscriptions", name] if !project.is_empty() && !name.is_empty()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscription_path() {
+        assert!(is_subscription_path("projects/ttm-db/subscriptions/bot"));
+        assert!(!is_subscription_path("ttm-db/subscriptions/bot"));
+        assert!(!is_subscription_path("projects/ttm-db/topics/bot"));
+        assert!(!is_subscription_path("projects//subscriptions/bot"));
+        assert!(!is_subscription_path("projects/ttm-db/subscriptions/bot/x"));
+    }
 
     #[test]
     fn sample_config_loads() {

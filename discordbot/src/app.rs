@@ -107,7 +107,7 @@ impl App {
         Ok(table)
     }
 
-    /// GAS から届いた内容などでキャッシュを差し替える
+    /// 読み込んだ内容でキャッシュを差し替える
     pub async fn cache_table(&self, table: &Table) {
         *self.table_cache.lock().await = Some((Instant::now(), Arc::new(table.clone())));
     }
@@ -162,20 +162,13 @@ pub struct SyncState {
     /// 状態ファイルが新規作成された (初回の同期では全件反映せず現状を記録するだけ)
     #[serde(skip)]
     pub fresh: bool,
-    /// ticket_id -> 最後に Discord へ反映した時刻 (UNIX ミリ秒)。
-    /// これより前に GAS が読んだ内容は古いので適用しない
-    #[serde(skip)]
-    pub pushed_at: HashMap<String, i64>,
-    /// 最後に適用した GAS 送信内容の読み取り時刻 (UNIX ミリ秒)。順序が入れ替わって届いた古い内容を捨てる
-    #[serde(skip)]
-    pub last_snapshot_at: i64,
     #[serde(skip)]
     path: String,
 }
 
 impl SyncState {
     /// ファイルが無ければ初回扱い (fresh)。読めない・壊れている場合は記録を捨て、
-    /// 次の GAS 送信で全件を反映し直す (初回扱いにすると変更が反映されないまま記録だけ進むため)
+    /// 次の同期で全件を反映し直す (初回扱いにすると変更が反映されないまま記録だけ進むため)
     fn load(path: &str) -> Self {
         let mut s = match std::fs::read_to_string(path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => SyncState {

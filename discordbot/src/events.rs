@@ -87,13 +87,15 @@ async fn on_status_button(app: &Data, i: &Interaction, rest: &str) -> Result<()>
     respond(app, i, &defer_ephemeral()).await?;
     let admin = is_admin(i.member.as_ref().and_then(|m| m.permissions));
     let seen = i.message.as_ref().and_then(render::updated_at_from_embed);
-    let text = match ops::change_status(app, ticket_id, role, actor, admin, seen).await {
-        Ok(ops::StatusOutcome::Changed { from, to }) => {
-            format!("「{from}」→「{to}」に変更しました")
+    // 変更はチケットの投稿に反映されるので、成功の知らせはすぐ消す
+    match ops::change_status(app, ticket_id, role, actor, admin, seen).await {
+        Ok(ops::StatusOutcome::Changed { .. }) => interact::delete_reply(app, i).await,
+        Err(e) => {
+            edit_reply(app, i, &format!("変更できませんでした: {e:#}")).await?;
+            interact::delete_reply_later(app, i).await;
         }
-        Err(e) => format!("変更できませんでした: {e:#}"),
-    };
-    edit_reply(app, i, &text).await
+    }
+    Ok(())
 }
 
 /// Forum Post 内に画像が投稿されたら image_urls に追記する

@@ -229,7 +229,9 @@ async fn status(app: &App, i: &Interaction, opts: &[CommandDataOption]) -> Resul
     let id = str_opt(opts, "id").unwrap_or_default();
     let status = str_opt(opts, "status").unwrap_or_default();
     let Some(role) = app.masters.read().await.role_of(&status) else {
-        return edit_reply(app, i, &format!("進行度「{status}」は選択肢にありません")).await;
+        edit_reply(app, i, &format!("進行度「{status}」は選択肢にありません")).await?;
+        interact::delete_reply_later(app, i).await;
+        return Ok(());
     };
     let actor = i.author_id().unwrap_or(Id::new(1));
     let admin = is_admin(i.member.as_ref().and_then(|m| m.permissions));
@@ -239,7 +241,9 @@ async fn status(app: &App, i: &Interaction, opts: &[CommandDataOption]) -> Resul
         }
         Err(e) => format!("変更できませんでした: {e:#}"),
     };
-    edit_reply(app, i, &reply).await
+    edit_reply(app, i, &reply).await?;
+    interact::delete_reply_later(app, i).await;
+    Ok(())
 }
 
 fn line(t: &Ticket) -> String {

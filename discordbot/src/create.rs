@@ -332,7 +332,7 @@ pub async fn on_modal(app: &App, i: &Interaction, data: &ModalInteractionData) -
     drafts.retain(|_, d| d.created.elapsed() < DRAFT_TTL);
     if editing.is_some() && !drafts.contains_key(&key) {
         drop(drafts);
-        return respond(app, i, &expired()).await;
+        return respond_expired(app, i).await;
     }
     let draft = drafts.entry(key.clone()).or_insert_with(|| Draft {
         user_id,
@@ -376,7 +376,7 @@ async fn on_extra_modal(
     let mut drafts = app.drafts.lock().await;
     let Some(draft) = drafts.get_mut(key).filter(|d| d.user_id == user_id) else {
         drop(drafts);
-        return respond(app, i, &expired()).await;
+        return respond_expired(app, i).await;
     };
     draft.due = sub.text("due");
     draft.parent = sub.text("parent");
@@ -392,11 +392,15 @@ fn due_problem(due: &str) -> Option<String> {
     })
 }
 
-fn expired() -> InteractionResponse {
-    interact::update_message(
+/// 確認メッセージを期限切れの案内に書き換え、少し置いて消す
+async fn respond_expired(app: &App, i: &Interaction) -> Result<()> {
+    let res = interact::update_message(
         "入力の有効期限が切れました。もう一度 `/ticket create` を実行してください。",
         Vec::new(),
-    )
+    );
+    respond(app, i, &res).await?;
+    interact::delete_reply_later(app, i).await;
+    Ok(())
 }
 
 /// 2段目のメッセージ (入力内容の確認 + 発行ボタン)
@@ -457,7 +461,7 @@ pub async fn on_component(app: &App, i: &Interaction, rest: &str) -> Result<()> 
     let mut drafts = app.drafts.lock().await;
     let Some(draft) = drafts.get_mut(key).filter(|d| d.user_id == user_id) else {
         drop(drafts);
-        return respond(app, i, &expired()).await;
+        return respond_expired(app, i).await;
     };
     match action {
         "edit" => {
@@ -481,17 +485,14 @@ pub async fn on_component(app: &App, i: &Interaction, rest: &str) -> Result<()> 
         "cancel" => {
             drafts.remove(key);
             drop(drafts);
-            let res = interact::update_message("発行をキャンセルしました。", Vec::new());
-            respond(app, i, &res).await
+            respond(app, i, &deferred_update()).await?;
+            interact::delete_reply(app, i).await;
+            Ok(())
         }
         "go" => {
             if draft.issuing {
                 drop(drafts);
-                let res = interact::response(
-                    InteractionResponseType::DeferredUpdateMessage,
-                    InteractionResponseDataBuilder::new().build(),
-                );
-                return respond(app, i, &res).await;
+                return respond(app, i, &deferred_update()).await;
             }
             draft.issuing = true;
             let draft = draft.clone();
@@ -529,11 +530,7 @@ async fn issue(app: &App, i: &Interaction, key: &str, mut d: Draft) -> Result<()
     }
 
     // Sheets と Discord への書き込みで3秒を超えるので先に応答しておく
-    let res = interact::response(
-        InteractionResponseType::DeferredUpdateMessage,
-        InteractionResponseDataBuilder::new().build(),
-    );
-    respond(app, i, &res).await?;
+    respond(app, i, &deferred_update()).await?;
 
     let (assignee_id, assignee_name) = d.assignee.clone().unwrap_or_default();
     let input = NewTicket {
@@ -548,7 +545,9 @@ async fn issue(app: &App, i: &Interaction, key: &str, mut d: Draft) -> Result<()
         due_date: d.due.clone(),
         parent_id: Some(d.parent.clone()),
     };
-    let (content, components) = match ops::create_ticket(app, input).await {
+    let created = ops::create_ticket(app, input).await;
+    let issued = created.is_ok();
+    let (content, components) = match created {
         Ok(c) => {
             app.drafts.lock().await.remove(key);
             let mut s = format!("チケット **{}** を発行しました: {}", c.ticket_id, c.url);
@@ -569,7 +568,19 @@ async fn issue(app: &App, i: &Interaction, key: &str, mut d: Draft) -> Result<()
         .content(Some(&content))
         .components(Some(&components))
         .await?;
+    // 失敗時は確認メッセージから直せるよう残す
+    if issued {
+        interact::delete_reply_later(app, i).await;
+    }
     Ok(())
+}
+
+/// 操作されたメッセージを書き換えずに応答だけ返す
+fn deferred_update() -> InteractionResponse {
+    interact::response(
+        InteractionResponseType::DeferredUpdateMessage,
+        InteractionResponseDataBuilder::new().build(),
+    )
 }
 
 async fn save_notice(app: &App, key: &str, notice: Option<String>) {

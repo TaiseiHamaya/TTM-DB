@@ -1,5 +1,7 @@
 //! インタラクションへの応答の共通処理。
 
+use std::time::Duration;
+
 use anyhow::Result;
 use twilight_model::application::interaction::Interaction;
 use twilight_model::channel::message::{Component, MessageFlags};
@@ -13,6 +15,8 @@ use crate::render::truncate;
 
 /// Discord のメッセージ本文の上限
 pub const CONTENT_MAX: usize = 2000;
+/// 読み終わる頃に本人だけのメッセージを消すまでの時間
+pub const DELETE_DELAY: Duration = Duration::from_secs(10);
 
 pub fn response(
     kind: InteractionResponseType,
@@ -96,10 +100,26 @@ pub async fn followup(app: &App, i: &Interaction, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// 応答のメッセージを消す。ボタン・フォーム送信への応答なら操作されたメッセージが消える。
+/// 消せるのはインタラクションから15分以内
+pub async fn delete_reply(app: &App, i: &Interaction) {
+    if let Err(e) = app.interaction().delete_response(&i.token).await {
+        tracing::warn!(error = %e, "応答メッセージの削除に失敗");
+    }
+}
+
+/// 読む時間を置いてから応答のメッセージを消す
+pub async fn delete_reply_later(app: &App, i: &Interaction) {
+    tokio::time::sleep(DELETE_DELAY).await;
+    delete_reply(app, i).await;
+}
+
 /// 処理中のエラーを本人に知らせる (応答済みかどうか分からないので両方試す)
 pub async fn report_error(app: &App, i: &Interaction, err: &anyhow::Error) {
     let text = format!("エラーが発生しました: {err:#}");
-    if respond(app, i, &ephemeral(&text)).await.is_err() {
-        let _ = edit_reply(app, i, &text).await;
+    let shown =
+        respond(app, i, &ephemeral(&text)).await.is_ok() || edit_reply(app, i, &text).await.is_ok();
+    if shown {
+        delete_reply_later(app, i).await;
     }
 }

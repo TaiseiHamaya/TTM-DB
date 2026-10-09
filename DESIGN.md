@@ -21,7 +21,7 @@ Google Sheets (GAS) -> Discord Webhook -> Bot
 - Discord は入力と表示と通知を担う
 - Bot は Slash Commands と Modal と Button と Forum タグ操作と Sheets API を担う
 - Sheets はチケット台帳とマスタ定義を担う。全状態の正本とする
-- Sheets の GAS は人が編集したときと Discord で /sync を実行したときに Discord Webhook へシート内容を送る。Bot はこれを受けて Discord に反映する
+- Sheets の GAS は人が編集したときに Discord Webhook へシート内容を送る。Bot はこれを受けて Discord に反映する。/sync 実行時は Bot が Sheets を読んで反映し、記録として sync.json を投稿する
 
 ### 技術候補
 

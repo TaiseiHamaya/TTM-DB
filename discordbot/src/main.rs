@@ -15,6 +15,7 @@ use std::sync::Arc;
 use anyhow::{Context as _, Result};
 use twilight_gateway::{EventTypeFlags, Intents, Shard, ShardId, StreamExt as _};
 use twilight_http::Client;
+use twilight_model::gateway::event::Event;
 
 use crate::app::{App, Data};
 use crate::config::{Config, Env};
@@ -66,9 +67,21 @@ async fn main() -> Result<()> {
         | EventTypeFlags::MEMBER_ADD;
     let mut shard = Shard::new(ShardId::ONE, env.discord_token, intents);
     tracing::info!("TTM-DB 起動");
+    // READY は新規セッション確立のたびに届く。初回は起動完了、以降は再接続として通知
+    let mut announced = false;
     while let Some(item) = shard.next_event(wanted).await {
         match item {
             Ok(event) => {
+                if matches!(event, Event::Ready(_)) {
+                    let msg = if announced {
+                        "🔄 TTM-DB: Discord に再接続しました。"
+                    } else {
+                        "🟢 TTM-DB: 起動が完了しました。"
+                    };
+                    announced = true;
+                    let app = app.clone();
+                    tokio::spawn(async move { ops::alert(&app, msg.to_owned()).await });
+                }
                 tokio::spawn(events::handle(app.clone(), event));
             }
             Err(e) => tracing::warn!(error = %e, "Gateway イベントの受信に失敗"),

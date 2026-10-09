@@ -16,6 +16,10 @@ pub struct Env {
     /// Service Account JSON のファイルパス、または JSON 文字列そのもの
     pub google_sa_json: String,
     pub config_path: String,
+    /// スプシの GAS ウェブアプリの URL。/sync 実行時に呼んで sync.json を送らせる。未設定なら呼ばない
+    pub gas_sync_url: Option<String>,
+    /// GAS ウェブアプリと共有する合言葉 (スクリプト プロパティ SYNC_SECRET と同じ値)
+    pub gas_sync_secret: Option<String>,
 }
 
 impl Env {
@@ -29,6 +33,9 @@ impl Env {
                 .parse()
                 .with_context(|| format!("環境変数 {name} は数値IDである必要があります"))
         }
+        fn opt(name: &str) -> Option<String> {
+            std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+        }
         Ok(Self {
             discord_token: var("DISCORD_TOKEN")?,
             guild_id: id("GUILD_ID")?,
@@ -36,6 +43,8 @@ impl Env {
             spreadsheet_id: var("SPREADSHEET_ID")?,
             google_sa_json: var("GOOGLE_SA_JSON")?,
             config_path: std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.toml".into()),
+            gas_sync_url: opt("GAS_SYNC_URL"),
+            gas_sync_secret: opt("GAS_SYNC_SECRET"),
         })
     }
 }

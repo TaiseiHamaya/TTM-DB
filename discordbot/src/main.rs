@@ -62,6 +62,7 @@ async fn main() -> Result<()> {
     let wanted = EventTypeFlags::READY
         | EventTypeFlags::INTERACTION_CREATE
         | EventTypeFlags::MESSAGE_CREATE
+        | EventTypeFlags::MESSAGE_UPDATE
         | EventTypeFlags::MEMBER_ADD;
     let mut shard = Shard::new(ShardId::ONE, env.discord_token, intents);
     tracing::info!("TTM-DB 起動");

@@ -588,14 +588,15 @@ pub struct Snapshot {
     pub masters: Option<Vec<Vec<String>>>,
 }
 
-/// GAS から届いたシート内容を Discord に反映する (Bot から Sheets は読まない)
-pub async fn apply_snapshot(app: &App, snap: Snapshot) -> Result<usize> {
+/// GAS から届いたシート内容を Discord に反映する (Bot から Sheets は読まない)。
+/// 処理済みより古い (または同じ) 内容なら何もせず None を返す
+pub async fn apply_snapshot(app: &App, snap: Snapshot) -> Result<Option<usize>> {
     let _guard = app.write_lock.lock().await;
     {
         let mut st = app.sync_state.lock().await;
         if snap.read_at <= st.last_snapshot_at {
             tracing::info!(read_at = snap.read_at, "古いスプシ送信内容のため無視");
-            return Ok(0);
+            return Ok(None);
         }
         st.last_snapshot_at = snap.read_at;
     }
@@ -607,13 +608,44 @@ pub async fn apply_snapshot(app: &App, snap: Snapshot) -> Result<usize> {
         }
     }
     let Some(rows) = &snap.tickets else {
-        return Ok(0);
+        return Ok(Some(0));
     };
     let Some(table) = check_schema(app, Table::from_rows(rows, &app.cfg)).await? else {
-        return Ok(0);
+        return Ok(Some(0));
     };
     app.cache_table(&table).await;
-    sync_table(app, &table, false, Some(snap.read_at)).await
+    sync_table(app, &table, false, Some(snap.read_at)).await.map(Some)
+}
+
+/// /sync 実行時にスプシの GAS ウェブアプリを呼び、同期チャンネルへ sync.json を送らせる。
+/// GAS_SYNC_URL が未設定なら何もせず false を返す
+pub async fn request_gas_push(app: &App) -> Result<bool> {
+    let Some(url) = app.env.gas_sync_url.as_deref() else {
+        return Ok(false);
+    };
+    let secret = app.env.gas_sync_secret.as_deref().unwrap_or_default();
+    #[derive(serde::Deserialize)]
+    struct Reply {
+        ok: bool,
+        #[serde(default)]
+        error: Option<String>,
+    }
+    // ウェブアプリは結果を別 URL へのリダイレクトで返す (reqwest が GET で追従する)
+    let res: Reply = app
+        .web
+        .post(url)
+        .json(&serde_json::json!({ "secret": secret }))
+        .send()
+        .await
+        .context("GAS ウェブアプリを呼べません")?
+        .error_for_status()?
+        .json()
+        .await
+        .context("GAS ウェブアプリの応答が不正です (デプロイ設定を確認してください)")?;
+    if !res.ok {
+        bail!("GAS: {}", res.error.unwrap_or_default());
+    }
+    Ok(true)
 }
 
 /// Sheets 全行を読み直して Discord に反映する (/sync all など手動用)

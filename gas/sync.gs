@@ -1,55 +1,89 @@
 /**
- * TTM-DB: スプシが編集されたら tickets / masters シートの内容を Discord Webhook へ送る。
- * Bot は Webhook の投稿 (添付 sync.json) を受け取り、差分を Forum Post に反映する。
+ * TTM-DB: tickets / masters シートの内容を Discord Webhook へ送る。
+ * Bot は Webhook のメッセージ (添付 sync.json) を受け取り、差分を Forum Post に反映する。
+ *
+ * 送り方:
+ *   - 人がスプシを編集したとき (編集トリガー): 同期チャンネルの固定メッセージ1件の sync.json を
+ *     差し替える。新しい投稿はしない。Bot はメッセージの更新イベントで反映する
+ *   - Discord で /sync を実行したとき (Bot がウェブアプリを呼ぶ): sync.json を新しく投稿し、記録として残す
+ * 変更トリガー (onChange) は Bot の Sheets API 書き込みでも動き、チケット発行のたびに送信されて
+ * しまうので使わない。編集トリガー (onEdit) は API 書き込みでは動かない。
  *
  * セットアップ:
  *   1. 拡張機能 > Apps Script にこのファイルを貼る
- *   2. プロジェクトの設定 > スクリプト プロパティに DISCORD_WEBHOOK_URL を追加する
+ *   2. プロジェクトの設定 > スクリプト プロパティに次を追加する
+ *        DISCORD_WEBHOOK_URL: 同期チャンネルの Webhook URL
+ *        SYNC_SECRET: Bot と共有する合言葉 (Bot の環境変数 GAS_SYNC_SECRET と同じ値)
+ *      固定メッセージの ID は初回送信時に SYNC_MESSAGE_ID として自動で保存される
  *   3. 下の TICKETS_SHEET / MASTERS_SHEET を Bot の config.toml と同じシート名にする
- *   4. setupTrigger を1回だけ実行して権限を承認する (変更トリガーが作られる)
- *
- * Bot (API) による書き込みではトリガーは動かないので、送信がループすることはない。
+ *   4. setupTrigger を1回だけ実行して権限を承認する (編集トリガーが作られ、旧版の変更トリガーは消える)
+ *   5. デプロイ > 新しいデプロイ > ウェブアプリ (実行ユーザー: 自分、アクセス: 全員) で公開し、
+ *      ウェブアプリの URL を Bot の環境変数 GAS_SYNC_URL に設定する
  */
 
 const TICKETS_SHEET = 'tickets';
 const MASTERS_SHEET = 'masters';
-// 書式変更だけのときは送らない
-const SKIP_CHANGE_TYPES = ['FORMAT'];
 const MAX_RETRY = 5;
+// 旧版が作っていた変更トリガーのハンドラ名 (setupTrigger で削除する)
+const OLD_HANDLERS = ['onSheetChange'];
+// 編集で差し替える固定メッセージの ID を保存するスクリプト プロパティ
+const MESSAGE_ID_KEY = 'SYNC_MESSAGE_ID';
+// 通知を出さない (@silent) メッセージフラグ
+const SUPPRESS_NOTIFICATIONS = 1 << 12;
 
-/** 変更トリガーを作成する (既存のものは作り直す) */
+/** 編集トリガーを作成する (既存のものと旧版の変更トリガーは作り直す) */
 function setupTrigger() {
   ScriptApp.getProjectTriggers()
-    .filter((t) => t.getHandlerFunction() === 'onSheetChange')
+    .filter((t) => {
+      const h = t.getHandlerFunction();
+      return h === 'onSheetEdit' || OLD_HANDLERS.indexOf(h) >= 0;
+    })
     .forEach((t) => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('onSheetChange')
+  ScriptApp.newTrigger('onSheetEdit')
     .forSpreadsheet(SpreadsheetApp.getActive())
-    .onChange()
+    .onEdit()
     .create();
 }
 
-/** 手動で送るためのメニュー */
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('TTM-DB')
-    .addItem('Discord へ同期', 'pushToDiscord')
-    .addToUi();
+/** インストール型の編集トリガー (人の編集でのみ動き、Bot の API 書き込みでは動かない) */
+function onSheetEdit(e) {
+  // 対象外のシートの編集は送らない
+  const name = e && e.range ? e.range.getSheet().getName() : '';
+  if (name !== TICKETS_SHEET && name !== MASTERS_SHEET) return;
+  pushToDiscord(false);
 }
 
-/** インストール型の変更トリガー */
-function onSheetChange(e) {
-  if (e && SKIP_CHANGE_TYPES.indexOf(e.changeType) >= 0) return;
-  if (e && e.changeType === 'EDIT') {
-    // 対象外のシートの編集は送らない
-    const name = SpreadsheetApp.getActiveSheet().getName();
-    if (name !== TICKETS_SHEET && name !== MASTERS_SHEET) return;
+/** ウェブアプリの入口。Bot が /sync 実行時に { "secret": "..." } を POST してくる */
+function doPost(e) {
+  const secret = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+  let body = {};
+  try {
+    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+  } catch (_) {
+    // 不正な本文は合言葉不一致として扱う
   }
-  pushToDiscord();
+  if (!secret || body.secret !== secret) return reply({ ok: false, error: '合言葉が一致しません' });
+  try {
+    pushToDiscord(true);
+    return reply({ ok: true });
+  } catch (err) {
+    return reply({ ok: false, error: String(err && err.message ? err.message : err) });
+  }
 }
 
-/** tickets / masters の表示値を読んで Webhook に送る */
-function pushToDiscord() {
-  const url = PropertiesService.getScriptProperties().getProperty('DISCORD_WEBHOOK_URL');
+function reply(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(
+    ContentService.MimeType.JSON,
+  );
+}
+
+/**
+ * tickets / masters の表示値を読んで Webhook に送る。
+ * asNewPost = true (/sync) なら新しく投稿し、false (編集) なら固定メッセージを差し替える
+ */
+function pushToDiscord(asNewPost) {
+  const props = PropertiesService.getScriptProperties();
+  const url = props.getProperty('DISCORD_WEBHOOK_URL');
   if (!url) throw new Error('スクリプト プロパティ DISCORD_WEBHOOK_URL が未設定です');
 
   // 連続編集で送信が前後しないよう直列化する
@@ -63,14 +97,43 @@ function pushToDiscord() {
       masters: displayValues(ss.getSheetByName(MASTERS_SHEET), 3),
     };
     const rows = snapshot.tickets ? Math.max(snapshot.tickets.length - 1, 0) : 0;
-    const payload = {
+    const file = Utilities.newBlob(JSON.stringify(snapshot), 'application/json', 'sync.json');
+
+    if (asNewPost) {
+      send('post', url + '?wait=true', {
+        payload_json: JSON.stringify({
+          content: `TTM-DB sync: tickets ${rows}行`,
+          allowed_mentions: { parse: [] },
+        }),
+        'files[0]': file,
+      });
+      return;
+    }
+
+    const content = `TTM-DB 自動同期 (スプシ編集時にこのメッセージが更新されます): tickets ${rows}行`;
+    const id = props.getProperty(MESSAGE_ID_KEY);
+    if (id) {
+      // 既存の添付は attachments に含めないことで消え、files[0] に置き換わる
+      const res = send('patch', `${url}/messages/${id}`, {
+        payload_json: JSON.stringify({
+          content: content,
+          allowed_mentions: { parse: [] },
+          attachments: [{ id: 0, filename: 'sync.json' }],
+        }),
+        'files[0]': file,
+      }, true);
+      if (res) return;
+      // 固定メッセージが削除されていたら作り直す
+    }
+    const created = send('post', url + '?wait=true', {
       payload_json: JSON.stringify({
-        content: `TTM-DB sync: tickets ${rows}行`,
+        content: content,
         allowed_mentions: { parse: [] },
+        flags: SUPPRESS_NOTIFICATIONS,
       }),
-      'files[0]': Utilities.newBlob(JSON.stringify(snapshot), 'application/json', 'sync.json'),
-    };
-    send(url, payload);
+      'files[0]': file,
+    });
+    props.setProperty(MESSAGE_ID_KEY, created.id);
   } finally {
     lock.releaseLock();
   }
@@ -85,16 +148,20 @@ function displayValues(sheet, cols) {
   return sheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
 }
 
-/** Webhook に送る。レート制限 (429) なら待って再送する */
-function send(url, payload) {
+/**
+ * Webhook に送り、応答のメッセージを返す。レート制限 (429) なら待って再送する。
+ * allowMissing なら 404 (メッセージが無い) のとき null を返す
+ */
+function send(method, url, payload, allowMissing) {
   for (let i = 0; i < MAX_RETRY; i++) {
-    const res = UrlFetchApp.fetch(url + '?wait=true', {
-      method: 'post',
+    const res = UrlFetchApp.fetch(url, {
+      method: method,
       payload: payload,
       muteHttpExceptions: true,
     });
     const code = res.getResponseCode();
-    if (code >= 200 && code < 300) return;
+    if (code >= 200 && code < 300) return JSON.parse(res.getContentText() || '{}');
+    if (code === 404 && allowMissing) return null;
     if (code === 429) {
       const body = JSON.parse(res.getContentText() || '{}');
       Utilities.sleep(Math.ceil((body.retry_after || 1) * 1000));

@@ -62,15 +62,17 @@ Discord でタスクチケットの発行と状態管理を行う Bot です。�
 
 ### 4. スプシの GAS を設定する (スプシ → Discord の同期)
 
-Bot はスプシを定期取得しません。スプシが編集されると GAS が tickets / masters の内容を Discord Webhook に投稿し、Bot がそれを受けて Forum Post に反映します。
+Bot はスプシを定期取得しません。スプシが編集されると、GAS は同期チャンネルの固定メッセージ1件の添付 (sync.json) を tickets / masters の最新内容に差し替えます (新しい投稿はしません)。Bot はそのメッセージの更新を受けて Forum Post に反映します。Discord で `/sync ticket` / `/sync all` を実行したときは、Bot が GAS を呼んで sync.json を新しく1回投稿させ、その投稿は記録として残ります。
 
 1. Discord に同期用のテキストチャンネル (例: `#ticket-sync`、Bot 以外は閲覧不要) を作り、チャンネル設定 > 連携サービス > ウェブフックで Webhook を作成して URL をコピーする
 2. Webhook URL `https://discord.com/api/webhooks/<ID>/<トークン>` の `<ID>` を `config.toml` の `discord.sync_webhook_id` に書く。Bot はこの Webhook の投稿だけを同期データとして受け付ける
 3. スプシの 拡張機能 > Apps Script に `gas/sync.gs` を貼り、先頭の `TICKETS_SHEET` / `MASTERS_SHEET` を 2 で決めたシート名にする
-4. プロジェクトの設定 > スクリプト プロパティに `DISCORD_WEBHOOK_URL` = 1 の URL を追加する
-5. エディタで `setupTrigger` を1回実行し、権限を承認する (変更トリガーが作られる)
+4. プロジェクトの設定 > スクリプト プロパティに `DISCORD_WEBHOOK_URL` = 1 の URL と、`SYNC_SECRET` = 任意の合言葉 (推測されにくい長い文字列) を追加する
+5. エディタで `setupTrigger` を1回実行し、権限を承認する (編集トリガーが作られ、旧版の変更トリガーは削除される)
+6. デプロイ > 新しいデプロイ > 種類「ウェブアプリ」、実行ユーザー「自分」、アクセスできるユーザー「全員」でデプロイし、ウェブアプリの URL を Bot の環境変数 `GAS_SYNC_URL` に、4 の合言葉を `GAS_SYNC_SECRET` に設定する。スクリプトを貼り直したときは「デプロイを管理」から新しいバージョンで更新する
+7. 固定メッセージは初回の編集時に GAS が自動で投稿し、その ID をスクリプト プロパティ `SYNC_MESSAGE_ID` に保存する。固定メッセージを消した場合は次の編集時に作り直される
 
-以降、スプシを編集するたびに同期チャンネルへ投稿され、Bot が反映すると ✅、失敗すると ⚠ のリアクションが付きます。メニュー「TTM-DB > Discord へ同期」で手動送信もできます。Bot が Sheets API で書き込んだ変更ではトリガーは動きません。
+固定メッセージと `/sync` の投稿には、Bot が反映に成功すると ✅、失敗すると ⚠ のリアクションが付きます (固定メッセージは最新の結果に付け替わります)。Bot が Sheets API で書き込んだ変更 (チケット発行など) では送信されません。行の削除など、セルの編集にならない変更は `/sync all` で反映してください。
 
 ### 5. 起動
 
@@ -105,7 +107,7 @@ journalctl -u ttm-db -f
 | `/ticket status id status` | 進行度を変更 (ボタンの代替) |
 | `/list [status] [category] [assignee] [priority]` | 一覧 (最大20件) |
 | `/search query` | タイトル・詳細・ID の部分一致検索 |
-| `/sync ticket id` | 指定チケットを Sheets から即時同期 |
+| `/sync ticket id` | 指定チケットを Sheets から即時同期し、sync.json を同期チャンネルに投稿 |
 | `/sync check` | マスタ不整合・必須欠落・ID重複などを検査 |
 | `/sync all` / `tags` / `members` | 管理者のみ。Sheets を読み直して全件強制同期 / タグ名変更反映 / 参加者取込 |
 
@@ -113,4 +115,4 @@ journalctl -u ttm-db -f
 
 - `image_urls` に保存する画像 URL は Discord CDN の URL で、一定時間で失効します。元の画像は Post 内のメッセージに残ります
 - 初回起動後 (`data/sync_state.json` がまだ無いとき) に最初に届いたスプシの送信内容は、既存行を同期済みとみなして記録だけ行います。Discord に反映が必要なら `/sync all` を実行してください
-- Bot が停止中にスプシを編集した場合、その変更は次にスプシが編集されたとき (またはメニューの手動送信・`/sync all`) に反映されます
+- Bot が停止中にスプシを編集した場合、その変更は次にスプシが編集されたとき (または `/sync all`) に反映されます

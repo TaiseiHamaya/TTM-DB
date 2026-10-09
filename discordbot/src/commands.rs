@@ -364,13 +364,14 @@ async fn sync(app: &App, i: &Interaction, sub: &str, opts: &[CommandDataOption])
                 Ok(()) => format!("{id} を同期しました"),
                 Err(e) => format!("同期に失敗しました: {e:#}"),
             };
-            edit_reply(app, i, &reply).await
+            edit_reply(app, i, &with_gas_push(app, reply).await).await
         }
         "all" => {
             app.reload_masters().await?;
             crate::render::sync_forum_tags(app, false).await?;
             let n = ops::sync_all(app, true).await?;
-            edit_reply(app, i, &format!("{n} 件を同期しました")).await
+            let reply = format!("{n} 件を同期しました");
+            edit_reply(app, i, &with_gas_push(app, reply).await).await
         }
         "check" => sync_check(app, i).await,
         "tags" => {
@@ -384,6 +385,17 @@ async fn sync(app: &App, i: &Interaction, sub: &str, opts: &[CommandDataOption])
         }
         "members" => sync_members(app, i).await,
         _ => Ok(()),
+    }
+}
+
+/// GAS に sync.json を同期チャンネルへ送らせ、失敗したら返信に添える
+async fn with_gas_push(app: &App, reply: String) -> String {
+    match ops::request_gas_push(app).await {
+        Ok(_) => reply,
+        Err(e) => {
+            tracing::warn!(error = %e, "GAS への同期データ送信依頼に失敗");
+            format!("{reply}\n⚠ sync.json の送信に失敗しました: {e:#}")
+        }
     }
 }
 

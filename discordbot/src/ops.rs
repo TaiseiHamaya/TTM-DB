@@ -307,11 +307,8 @@ async fn update_post(
         edit = edit.name(&title);
         need = true;
     }
-    let mut cur_tags = thread.applied_tags.clone().unwrap_or_default();
-    let mut new_tags = tags.clone();
-    cur_tags.sort();
-    new_tags.sort();
-    if cur_tags != new_tags {
+    // Post 上のタグは付与した順に並ぶため、並びの違いも差分として付け直す
+    if thread.applied_tags.as_deref().unwrap_or_default() != tags.as_slice() {
         edit = edit.applied_tags(Some(&tags));
         need = true;
     }

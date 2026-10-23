@@ -302,9 +302,7 @@ fn tag_name(cfg: &Config, col: Col, value: &str) -> String {
 
 pub async fn applied_tags(app: &App, t: &Ticket) -> Vec<Id<TagMarker>> {
     let tags = app.tags.read().await;
-    app.cfg
-        .tags
-        .order_cols()
+    [Col::Status, Col::Category, Col::Priority, Col::Assignee]
         .into_iter()
         .filter(|&c| !t.get(c).is_empty())
         .filter_map(|c| tags.get(&tag_name(&app.cfg, c, t.get(c))).copied())
@@ -435,32 +433,15 @@ pub async fn sync_forum_tags(app: &App, cleanup: bool) -> Result<Vec<String>> {
         .iter()
         .map(|t| serde_json::to_value(t).unwrap_or_else(|_| json!({ "id": t.id, "name": t.name })))
         .collect();
-    for ((col, _), name) in wanted.iter().zip(&wanted_names) {
+    for ((col, _), name) in wanted.iter().zip(wanted_names) {
         if values.len() >= max {
             break;
         }
-        if !existing.iter().any(|t| t.name == *name) {
+        if !existing.iter().any(|t| t.name == name) {
             values.push(json!({ "name": name, "emoji_name": app.cfg.tags.emoji(*col) }));
             changed = true;
             report.push(format!("タグ追加: {name}"));
         }
-    }
-    // Post 上のタグは Forum のタグ一覧の順に並ぶため、tags.order の要素順に masters の順で並べ直す。
-    // masters に無いタグは末尾に元の順で残す
-    let order = app.cfg.tags.order_cols();
-    let rank = |v: &serde_json::Value| {
-        v["name"]
-            .as_str()
-            .and_then(|n| wanted_names.iter().position(|w| w == n))
-            .map_or((usize::MAX, usize::MAX), |i| {
-                let col = order.iter().position(|&c| c == wanted[i].0);
-                (col.unwrap_or(usize::MAX), i)
-            })
-    };
-    if !values.is_sorted_by_key(rank) {
-        values.sort_by_key(rank);
-        changed = true;
-        report.push("タグ並べ替え".to_owned());
     }
     if changed {
         put_forum_tags(app, values).await?;

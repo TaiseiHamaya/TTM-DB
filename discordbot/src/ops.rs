@@ -210,6 +210,9 @@ async fn create_post(app: &App, table: &Table, t: &Ticket, m: &Masters) -> Resul
         .create_message(post_id)
         .content("追加の画像は、このスレッドに投稿すると自動でチケットに登録されます。")
         .await?;
+    if let Err(e) = archive_if_finished(app, m, t, post_id.get()).await {
+        tracing::warn!(ticket_id = %t.id(), error = %e, "Post のアーカイブに失敗");
+    }
 
     let mut t = t.clone();
     t.set(Col::DiscordPostId, post_id.to_string());
@@ -220,7 +223,7 @@ async fn create_post(app: &App, table: &Table, t: &Ticket, m: &Masters) -> Resul
     Ok((post_id.get(), url))
 }
 
-/// Sheets の内容を Discord に反映する (タイトル・タグ・Locked・先頭 Embed)。
+/// Sheets の内容を Discord に反映する (タイトル・タグ・先頭 Embed)。
 /// Post が無ければ作成する。失敗時は先頭メッセージに同期失敗リアクションを付ける
 pub async fn push_ticket(app: &App, table: &Table, t: &Ticket) -> Result<()> {
     let m = app.masters.read().await.clone();
@@ -293,7 +296,6 @@ async fn update_post(
         .await?;
     let title = render::post_title(t);
     let tags = render::applied_tags(app, t).await;
-    let lock = m.role_of(t.get(Col::Status)).is_some_and(StatusRole::locks);
     let meta = thread.thread_metadata.as_ref();
     let archived = meta.is_some_and(|x| x.archived);
     let locked = meta.is_some_and(|x| x.locked);
@@ -313,13 +315,14 @@ async fn update_post(
         edit = edit.applied_tags(Some(&tags));
         need = true;
     }
-    // アーカイブされない運用。編集のため必ずアンアーカイブする
+    // アーカイブ中は編集できないため一度アンアーカイブする。終了済みなら最後にアーカイブし直す
     if archived {
         edit = edit.archived(false);
         need = true;
     }
-    if locked != lock {
-        edit = edit.locked(lock);
+    // ロックしない運用。旧仕様でロックされた Post も解除する
+    if locked {
+        edit = edit.locked(false);
         need = true;
     }
     if need {
@@ -337,6 +340,21 @@ async fn update_post(
         .components(Some(&components))
         .allowed_mentions(Some(&mention))
         .await?;
+    archive_if_finished(app, m, t, post_id).await
+}
+
+/// 完了・中断・破棄なら Post をアーカイブする。
+/// Post へのメッセージ投稿でアンアーカイブされるため、投稿した後にも呼ぶこと
+async fn archive_if_finished(app: &App, m: &Masters, t: &Ticket, post_id: u64) -> Result<()> {
+    if m.role_of(t.get(Col::Status))
+        .is_some_and(StatusRole::archives)
+    {
+        app.http
+            .update_thread(Id::new(post_id))
+            .archived(true)
+            .await
+            .context("Post のアーカイブに失敗しました")?;
+    }
     Ok(())
 }
 
@@ -428,6 +446,9 @@ pub async fn change_status(
             .content(&text)
             .allowed_mentions(Some(&mention))
             .await?;
+        if let Err(e) = archive_if_finished(app, &m, &updated, post_id).await {
+            tracing::warn!(ticket_id = %updated.id(), error = %e, "Post のアーカイブに失敗");
+        }
     }
     Ok(StatusOutcome::Changed {
         from: from_name,
@@ -702,6 +723,9 @@ async fn push_from_sheets(app: &App, table: &Table, t: &Ticket) -> Result<()> {
         .await
     {
         tracing::warn!(ticket_id = %t.id(), error = %e, "変更内容の投稿に失敗");
+    }
+    if let Err(e) = archive_if_finished(app, &m, t, post_id).await {
+        tracing::warn!(ticket_id = %t.id(), error = %e, "Post のアーカイブに失敗");
     }
     Ok(())
 }

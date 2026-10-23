@@ -42,8 +42,8 @@ impl StatusRole {
         Self::ALL.into_iter().find(|r| r.key() == s.trim())
     }
 
-    /// 完了・中断・破棄は Forum Post を Locked にして残す
-    pub fn locks(self) -> bool {
+    /// 完了・中断・破棄は Forum Post をアーカイブして一覧の下に送る
+    pub fn archives(self) -> bool {
         matches!(
             self,
             StatusRole::Done | StatusRole::Suspended | StatusRole::Discarded

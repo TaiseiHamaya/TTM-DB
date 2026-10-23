@@ -207,6 +207,8 @@ pub struct DiscordConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TagsConfig {
+    /// Post 上でのタグの表示順 (論理列名)。タグにする列をすべて1回ずつ並べる
+    pub order: Vec<String>,
     pub status_prefix: String,
     pub category_prefix: String,
     pub priority_prefix: String,
@@ -220,6 +222,9 @@ pub struct TagsConfig {
 impl Default for TagsConfig {
     fn default() -> Self {
         Self {
+            order: ["priority", "assignee", "status", "category"]
+                .map(String::from)
+                .into(),
             status_prefix: "進行度:".into(),
             category_prefix: "種類:".into(),
             priority_prefix: "優先度:".into(),
@@ -233,6 +238,38 @@ impl Default for TagsConfig {
 }
 
 impl TagsConfig {
+    /// タグにする列
+    pub const COLS: [Col; 4] = [Col::Status, Col::Category, Col::Priority, Col::Assignee];
+
+    /// order の検証 (タグにしない列・重複・不足ならエラー)
+    fn validate(&self) -> Result<()> {
+        let mut seen = Vec::new();
+        for key in &self.order {
+            let col = Col::parse(key, "config.toml の tags.order")?;
+            if !Self::COLS.contains(&col) {
+                bail!("tags.order の {key} はタグにする列ではありません");
+            }
+            if seen.contains(&col) {
+                bail!("tags.order に {key} が重複しています");
+            }
+            seen.push(col);
+        }
+        let missing: Vec<&str> = Self::COLS
+            .iter()
+            .filter(|c| !seen.contains(c))
+            .map(|c| c.key())
+            .collect();
+        if !missing.is_empty() {
+            bail!("tags.order に {} がありません", missing.join(", "));
+        }
+        Ok(())
+    }
+
+    /// Post 上でのタグの表示順
+    pub fn order_cols(&self) -> Vec<Col> {
+        self.order.iter().filter_map(|k| Col::from_key(k)).collect()
+    }
+
     /// タグにする列の接頭辞 (タグにしない列は空)
     pub fn prefix(&self, col: Col) -> &str {
         match col {
@@ -276,6 +313,7 @@ impl Config {
         for key in cfg.columns.names.keys().chain(cfg.columns.required.iter()) {
             Col::parse(key, "config.toml の columns")?;
         }
+        cfg.tags.validate()?;
         for col in Col::ALL {
             cfg.columns
                 .names
@@ -401,6 +439,45 @@ mod tests {
         assert_eq!(cfg.required_cols().len(), 13);
         assert_eq!(cfg.ticket.id_prefix, "T-");
         assert_eq!(cfg.sheets.header_row, 1);
+        assert_eq!(
+            cfg.tags.order_cols(),
+            [Col::Priority, Col::Assignee, Col::Status, Col::Category]
+        );
+    }
+
+    #[test]
+    fn tag_order() {
+        let tags = |order: &[&str]| TagsConfig {
+            order: order.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        assert!(TagsConfig::default().validate().is_ok());
+        assert!(
+            tags(&["category", "status", "assignee", "priority"])
+                .validate()
+                .is_ok()
+        );
+        // 不足・重複・タグにしない列・未知の列
+        assert!(
+            tags(&["status", "category", "priority"])
+                .validate()
+                .is_err()
+        );
+        assert!(
+            tags(&["status", "status", "category", "priority", "assignee"])
+                .validate()
+                .is_err()
+        );
+        assert!(
+            tags(&["status", "category", "priority", "assignee", "title"])
+                .validate()
+                .is_err()
+        );
+        assert!(
+            tags(&["status", "category", "priority", "nope"])
+                .validate()
+                .is_err()
+        );
     }
 
     #[test]
